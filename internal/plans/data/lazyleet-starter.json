@@ -1,0 +1,17 @@
+{
+  "slug": "lazyleet-starter",
+  "name": "lazyleet Starter 10",
+  "description": "A short warm-up set of well-known problems to shake down lazyleet.",
+  "problems": [
+    "two-sum",
+    "valid-parentheses",
+    "merge-two-sorted-lists",
+    "best-time-to-buy-and-sell-stock",
+    "valid-palindrome",
+    "invert-binary-tree",
+    "valid-anagram",
+    "binary-search",
+    "flood-fill",
+    "maximum-subarray"
+  ]
+}

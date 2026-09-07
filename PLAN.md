@@ -10,7 +10,7 @@ local test running and one-key submit — in the user's own editor.
 > **Plan Changes**. Keep companion research in `lazygit-ui-research.md` and
 > `leetcode-product-analysis.md`.
 
-Last updated: 2026-09-07 (Tier C workspace slice landed against a fixture)
+Last updated: 2026-09-07 (Phase 1 LeetCode API read paths landed & verified live)
 
 ---
 
@@ -176,26 +176,48 @@ build served as the spike).
 - [x] Decide D2 — resolved to Bubble Tea; the Tier C build was the spike.
 
 ### Phase 1 — LeetCode API client (headless)
-**Status: Not started**
+**Status: In progress** — read paths done and verified against live LeetCode;
+run/submit are client-only (Phase 6 wires them). `internal/leetcode`.
 
-- [ ] GraphQL client: `x-csrftoken` + `Referer` headers, gzip, retry/backoff,
-      rate limiting.
-- [ ] `lazyleet auth` — store `LEETCODE_SESSION` + `csrftoken` (0600 / keychain);
-      detect expiry.
-- [ ] Problem list (`problemsetQuestionList`), paginated: internal id, frontend
-      id, title, slug, difficulty, acRate, status, paidOnly, topicTags.
-- [ ] Study plans: `studyPlanV2Detail` for official plans; bundled JSON in
-      `internal/plans/` for Blind 75 / NeetCode 150.
-- [ ] Problem detail (`questionData`): HTML content, `exampleTestcases` /
-      `sampleTestCase`, `metaData`, `codeSnippets` per language, hints, similar.
-- [ ] Run: `POST /problems/{slug}/interpret_solution/` → poll
-      `/submissions/detail/{id}/check/`.
-- [ ] Submit: `POST /problems/{slug}/submit/` → poll check → verdict, runtime /
-      memory percentile, last failed case.
-- [ ] Submission history (`submissionList`) — optional.
-- [ ] `lazyleet debug list|problem <slug>|run ...` to exercise every call.
-- [ ] Cache layer with TTL + offline fallback; `lazyleet sync` force-refresh.
-- [ ] Recorded HTTP fixtures for tests.
+- [x] GraphQL client (`client.go`): `X-Csrftoken` + `Referer` + `Origin` +
+      `Cookie` headers, `rate.Limiter` (2 req/s), retry on 429/5xx with linear
+      backoff, `APIError` type, per-region base URLs, functional options.
+- [x] `lazyleet auth` — hidden stdin prompt (or `--stdin`) for
+      `LEETCODE_SESSION` + `csrftoken`, saved to `auth.json` (0600, temp-file
+      swap). `auth status` verifies via `userStatus`; `auth logout` deletes.
+- [x] Problem list (`problemsetQuestionList`), paginated
+      (`ListProblems` / `ListAllProblems` with progress cb): frontend id, slug,
+      title, difficulty, acRate, paidOnly, status, topic tags. `questionId` is
+      **not** in this response — filled later from detail; store upsert
+      preserves it across list re-syncs.
+- [x] Problem detail (`questionData`): `content` HTML → Markdown
+      (`html-to-markdown/v2`), `metaData` string → `Meta`, `exampleTestcases` →
+      `[]testcase.Case` via arity, `codeSnippets` → map, raw fields kept for
+      caching.
+- [x] Study plans: `studyPlanV2Detail` for official plans (`StudyPlanDetail`,
+      verified with `leetcode-75`). Bundled: `internal/plans` embeds JSON;
+      ships `lazyleet-starter` (10 problems). **Blind 75 / NeetCode 150 slug
+      lists still need authoring/verifying.**
+- [x] `lazyleet sync` — fetch full list → SQLite (`--force`, freshness check
+      against `cache_ttl`); syncs bundled plans too. `lazyleet debug
+      list [--remote] | problem <slug> | plan <slug>`.
+- [x] Cache layer: `store` methods `UpsertProblems` / `ListProblems` (filters:
+      difficulty, status, tag, search, paid) / `GetProblem` / `ProblemsFresh`,
+      `PutStudyPlan` / `GetStudyPlan`, `PutProblemDetail` / `GetProblemDetail`
+      (TTL). `solve <slug>` now resolves fixture → cache → API (+persist), so it
+      works for any public problem; `--refresh` bypasses the cache.
+- [x] Run: `Interpret` → `POST /problems/{slug}/interpret_solution/`; poll via
+      `CheckResult` / `PollResult` on `/submissions/detail/{id}/check/`.
+- [x] Submit: `Submit` → `POST /problems/{slug}/submit/`; `JudgeResult` carries
+      verdict, runtime/memory percentile, last failed case, compile/runtime err.
+- [x] Tests: httptest fake GraphQL server (list / detail / plan / gql-error /
+      retry / auth-headers), auth round-trip + 0600, metaData parse, plans
+      embed, store cache methods. 40+ tests, `-race` clean.
+- [ ] `submissionList` history — deferred to Phase 6.
+- [ ] Detect expired session mid-run and prompt re-auth (only `auth status`
+      checks today).
+- [ ] gzip request/response (Go's transport handles response gzip transparently;
+      explicit `Accept-Encoding` not set).
 
 ### Phase 2 — Browse mode (product part 1)
 **Status: Not started**
@@ -336,6 +358,19 @@ driven by `leetcode.Fixture` instead of the API. `internal/workspace`.
 
 Append newest entries at the top. One entry per working session or milestone.
 
+- **2026-09-07 (e)** — Phase 1 read paths. `internal/leetcode`: GraphQL client
+  (rate limit, retry, auth headers, `APIError`), `auth.go` (0600 creds),
+  `ListProblems`/`ListAllProblems`, `QuestionDetail` (HTML→MD), `StudyPlanDetail`,
+  `Interpret`/`Submit`/`PollResult` (Phase 6 wiring later), `WhoAmI`. New
+  `internal/plans` (embedded JSON, `lazyleet-starter`). `store`: problem +
+  study-plan + detail caching with TTL/filters. CLI: real `auth`
+  (+status/logout), real `sync`, `debug list|problem|plan`. `solve <slug>` now
+  fixture→cache→API for any public problem. Deps: `x/time/rate`,
+  `html-to-markdown/v2`, `x/term`. **Verified against live LeetCode**: `debug
+  list --remote` (4046 problems), `debug problem two-sum` (clean MD + parsed
+  metaData + 19 langs), `sync` (full list → SQLite in ~22s), `debug plan
+  leetcode-75` (75 problems w/ groups). 40+ tests `-race` clean, staticcheck
+  clean, goreleaser snapshot ok. Not yet committed.
 - **2026-09-07 (d)** — Committed and pushed. Repo:
   `github.com/sven97/lazyleet` (private). Initial commit `de76f28` +
   `a534b97` (staticcheck fix). CI green on GitHub Actions — `test` (gofmt,
@@ -375,6 +410,19 @@ Append newest entries at the top. One entry per working session or milestone.
 Technical discoveries, gotchas, and things that changed our understanding.
 Append newest at the top; reference the phase/task.
 
+- **2026-09-07** (Phase 1) — LeetCode's `problemsetQuestionList` response does
+  **not** include `questionId` (internal id) — only the frontend id. The
+  internal id (needed for run/submit) comes from `questionData`. `UpsertProblems`
+  therefore keeps an existing non-zero `question_id` when a list sync passes 0.
+- **2026-09-07** (Phase 1) — Live schema confirmed working as of today:
+  `problemsetQuestionList` (categorySlug/skip/limit/filters), `question`
+  (questionData), `studyPlanV2Detail` (planSubGroups), `userStatus`. Public
+  reads need no auth. Full list is ~4046 problems / 41 pages; at 2 req/s a full
+  `sync` is ~22s. Consider a `--rate` flag if that annoys.
+- **2026-09-07** (Phase 1) — `html-to-markdown/v2` (`htmltomarkdown.ConvertString`)
+  turns LeetCode's `content` HTML into clean Markdown that glamour renders well
+  (code fences, `**bold**`, inline `code`, lists all survive). No pre/post
+  scrubbing needed so far.
 - **2026-09-07** (CI) — `bubbles/viewport` v1.0.0 deprecated
   `LineUp/LineDown/ViewUp/ViewDown` in favour of
   `ScrollUp/ScrollDown/PageUp/PageDown` (staticcheck SA1019). Local dev must
@@ -426,3 +474,8 @@ Record every material deviation from this plan: what changed, why, and the date.
   will need `charmbracelet/x/vt` + `creack/pty`; not blocking anything now.
 - **2026-09-07** — Test-case file is `testcases.jsonl`, not the two-file
   `testcases.txt`/`.local.txt` split originally planned (see Findings).
+- **2026-09-07** — Phase 1 built read paths + client-only run/submit, skipping
+  `submissionList` history (moved to Phase 6). `solve <slug>` gained a
+  fixture→cache→API resolver so it works for any public problem now, ahead of
+  browse mode. Bundled study plans: shipped a small `lazyleet-starter` to prove
+  the path; Blind 75 / NeetCode 150 slug lists still TODO.

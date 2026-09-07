@@ -77,6 +77,8 @@ Output: [0,1]
 			"python3": "class Solution:\n    def twoSum(self, nums: List[int], target: int) -> List[int]:\n        \n",
 			"python":  "class Solution(object):\n    def twoSum(self, nums, target):\n        \"\"\"\n        :type nums: List[int]\n        :type target: int\n        :rtype: List[int]\n        \"\"\"\n        \n",
 		},
+		MetaData:         `{"name":"twoSum","params":[{"name":"nums","type":"integer[]"},{"name":"target","type":"integer"}],"return":{"type":"integer[]"}}`,
+		ExampleTestcases: "[2,7,11,15]\n9\n[3,2,4]\n6\n[3,3]\n6",
 		ExampleCases: []testcase.Case{
 			{In: []string{"[2,7,11,15]", "9"}, Out: "[0,1]"},
 			{In: []string{"[3,2,4]", "6"}, Out: "[1,2]"},

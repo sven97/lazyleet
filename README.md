@@ -5,10 +5,11 @@ study plans, then solve them in a side-by-side workspace with a local test
 runner and one-key submit — in your own editor.
 
 > **Status: early development.** See [`PLAN.md`](PLAN.md) for the phase-by-phase
-> build plan, progress log, and findings. Phase 0 is done. A first slice of the
-> coding workspace ("Tier C": statement + live solution mirror + local test
-> results) works against a bundled Two Sum fixture — the LeetCode API (Phase 1)
-> and browse mode (Phase 2) are not built yet.
+> build plan, progress log, and findings. Phase 0 is done; the LeetCode API
+> client (Phase 1) reads problems, detail, and study plans from live LeetCode
+> and caches them; the "Tier C" coding workspace (statement + live solution
+> mirror + local Python test runner) works for any public problem. Browse mode
+> (Phase 2) and run/submit-to-LeetCode (Phase 6) are not built yet.
 
 ## Building
 
@@ -23,14 +24,26 @@ Requires Go 1.27+. The SQLite driver is pure Go, so no C toolchain is needed.
 ## Usage (so far)
 
 ```sh
-lazyleet solve two-sum        # open the Tier C coding workspace for the fixture
-lazyleet solve two-sum --lang python3
+lazyleet sync                 # cache the full problem list + study plans locally
+lazyleet solve two-sum        # open the Tier C coding workspace for any problem
+lazyleet solve valid-parentheses --lang python3
+lazyleet solve two-sum --refresh   # bypass the local cache
+
+lazyleet auth                 # store LeetCode cookies (only needed for run/submit)
+lazyleet auth status
+lazyleet auth logout
+
+lazyleet debug list [--remote]     # cached (or live) problem list
+lazyleet debug problem <slug>      # fetch + print one problem's detail
+lazyleet debug plan leetcode-75    # print an official or bundled study plan
+lazyleet debug paths | debug config
 
 lazyleet                      # browse mode (Phase 2 — not built yet)
-lazyleet debug paths          # show resolved config/data locations
-lazyleet debug config         # show the effective configuration
 lazyleet --version
 ```
+
+Problem data is read from a bundled fixture, then the local SQLite cache, then
+LeetCode (no login required for public problems; results are cached afterwards).
 
 In the workspace: `e` edit in `$EDITOR` · `r` run local tests · `tab` switch
 pane · `j`/`k` scroll · `z` zoom the focused pane · `q` quit. Saving the

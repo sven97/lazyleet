@@ -11,10 +11,14 @@ type Question struct {
 	Slug         string            // URL slug, e.g. "two-sum"
 	Title        string            // "Two Sum"
 	Difficulty   string            // Easy | Medium | Hard
-	Statement    string            // Markdown (converted from LeetCode HTML in Phase 2)
+	Statement    string            // Markdown (converted from LeetCode HTML)
 	Meta         Meta              // the entry point the judge calls
 	CodeSnippets map[string]string // language slug -> starter code
-	ExampleCases []testcase.Case   // worked examples from the statement, with answers
+	ExampleCases []testcase.Case   // worked examples derived from ExampleTestcases
+
+	// Raw fields kept for caching and debugging.
+	MetaData         string // LeetCode's metaData JSON string
+	ExampleTestcases string // LeetCode's exampleTestcases block (N lines per case)
 }
 
 // Meta describes the function the solution must implement, derived from
