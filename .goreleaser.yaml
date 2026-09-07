@@ -1,0 +1,54 @@
+# goreleaser v2 configuration. Run `goreleaser check` to validate.
+version: 2
+
+project_name: lazyleet
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: lazyleet
+    main: ./cmd/lazyleet
+    binary: lazyleet
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.ShortCommit}}
+      - -X main.date={{.Date}}
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+
+archives:
+  - id: default
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - README.md
+      - LICENSE*
+
+checksum:
+  name_template: checksums.txt
+
+release:
+  github:
+    owner: sven97
+    name: lazyleet
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot-{{ .ShortCommit }}"
+
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"

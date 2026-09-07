@@ -1,0 +1,18 @@
+# Build output
+/dist/
+/lazyleet
+*.test
+*.out
+
+# Local dev state (never commit real LeetCode session cookies)
+/.lazyleet/
+auth.json
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/

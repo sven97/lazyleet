@@ -1,0 +1,497 @@
+package tui
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"os/exec"
+	"strings"
+	"time"
+
+	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/viewport"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/glamour"
+	"github.com/charmbracelet/lipgloss"
+
+	"github.com/sven97/lazyleet/internal/leetcode"
+	"github.com/sven97/lazyleet/internal/runner"
+	"github.com/sven97/lazyleet/internal/workspace"
+)
+
+// WorkspaceModel is the Bubble Tea model for Tier C: statement, a read-only
+// mirror of the solution file, and local run results, side by side, with a
+// file-watch + run-on-save loop.
+type WorkspaceModel struct {
+	ws   *workspace.Workspace
+	q    leetcode.Question
+	th   Theme
+	keys KeyMap
+
+	editor    string
+	runOnSave bool
+	debounce  time.Duration
+
+	width, height int
+	ready         bool
+	focused       Pane
+	mode          ScreenMode
+	layout        Layout
+
+	statement viewport.Model
+	code      viewport.Model
+	results   viewport.Model
+
+	stmtRenderer *glamour.TermRenderer
+	stmtWidth    int
+	codeSrc      string
+
+	runner    runner.Runner
+	runnerErr error // why there is no local runner for this language, if so
+	running   bool
+	runGen    int
+	spin      spinner.Model
+	lastRun   *runner.Result
+	lastErr   error
+
+	watcher   *workspace.Watcher
+	statusMsg string
+}
+
+type fileChangedMsg struct{}
+type runDebounceMsg struct{ gen int }
+type runFinishedMsg struct {
+	res runner.Result
+	err error
+}
+type editorFinishedMsg struct{ err error }
+
+// NewWorkspaceModel builds the model. It starts the file watcher; call Close
+// (via the returned model after Run) is not needed — the watcher is closed when
+// the program exits through tea.Quit handling.
+func NewWorkspaceModel(ws *workspace.Workspace, q leetcode.Question, editor string, runOnSave bool, debounceMs int) (*WorkspaceModel, error) {
+	sp := spinner.New()
+	sp.Spinner = spinner.Dot
+
+	m := &WorkspaceModel{
+		ws:        ws,
+		q:         q,
+		th:        DefaultTheme(),
+		keys:      DefaultKeyMap(),
+		editor:    editor,
+		runOnSave: runOnSave,
+		debounce:  time.Duration(debounceMs) * time.Millisecond,
+		focused:   PaneCode,
+		mode:      ModeNormal,
+		spin:      sp,
+	}
+
+	if r, ok := runner.For(ws.Lang); ok {
+		if r.Available() {
+			m.runner = r
+		} else {
+			m.runnerErr = fmt.Errorf("%s toolchain not found on PATH; press R to run on LeetCode instead", ws.Lang)
+		}
+	} else {
+		m.runnerErr = fmt.Errorf("no local runner for %s yet; press R to run on LeetCode instead", ws.Lang)
+	}
+
+	src, err := ws.ReadSolution()
+	if err != nil {
+		return nil, err
+	}
+	m.codeSrc = src
+
+	w, err := workspace.Watch(ws.SolutionPath)
+	if err != nil {
+		return nil, err
+	}
+	m.watcher = w
+
+	return m, nil
+}
+
+// Init implements tea.Model.
+func (m *WorkspaceModel) Init() tea.Cmd {
+	return tea.Batch(m.spin.Tick, m.waitForFileChange())
+}
+
+func (m *WorkspaceModel) waitForFileChange() tea.Cmd {
+	return func() tea.Msg {
+		<-m.watcher.Events
+		return fileChangedMsg{}
+	}
+}
+
+func (m *WorkspaceModel) runCmd() tea.Cmd {
+	ws := m.ws
+	meta := m.q.Meta
+	return func() tea.Msg {
+		cases, err := ws.ReadCases()
+		if err != nil {
+			return runFinishedMsg{err: fmt.Errorf("read test cases: %w", err)}
+		}
+		res, err := m.runner.Run(context.Background(), runner.Spec{
+			Lang:         ws.Lang,
+			SolutionPath: ws.SolutionPath,
+			Meta:         meta,
+			Cases:        cases,
+		})
+		return runFinishedMsg{res: res, err: err}
+	}
+}
+
+func (m *WorkspaceModel) editCmd() tea.Cmd {
+	// Route through the shell so an editor command with flags ("code -w") works.
+	line := fmt.Sprintf("%s %q", m.editor, m.ws.SolutionPath)
+	c := exec.Command("sh", "-c", line)
+	c.Stdin, c.Stdout, c.Stderr = os.Stdin, os.Stdout, os.Stderr
+	return tea.ExecProcess(c, func(err error) tea.Msg { return editorFinishedMsg{err: err} })
+}
+
+func (m *WorkspaceModel) startRun() (tea.Model, tea.Cmd) {
+	if m.runner == nil {
+		m.statusMsg = m.runnerErr.Error()
+		return m, nil
+	}
+	m.runGen++
+	m.running = true
+	m.lastErr = nil
+	m.statusMsg = ""
+	m.refreshResults()
+	return m, tea.Batch(m.runCmd(), m.spin.Tick)
+}
+
+// Update implements tea.Model.
+func (m *WorkspaceModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width, m.height = msg.Width, msg.Height
+		m.relayout()
+		m.ready = true
+		return m, nil
+
+	case tea.KeyMsg:
+		return m.handleKey(msg)
+
+	case tea.MouseMsg:
+		vp := m.focusedViewport()
+		var cmd tea.Cmd
+		*vp, cmd = vp.Update(msg)
+		return m, cmd
+
+	case fileChangedMsg:
+		return m.handleFileChange()
+
+	case runDebounceMsg:
+		if msg.gen == m.runGen && !m.running {
+			return m.startRun()
+		}
+		return m, nil
+
+	case runFinishedMsg:
+		m.running = false
+		m.lastErr = msg.err
+		if msg.err == nil {
+			r := msg.res
+			m.lastRun = &r
+		}
+		m.refreshResults()
+		return m, nil
+
+	case editorFinishedMsg:
+		if msg.err != nil {
+			m.statusMsg = "editor exited: " + msg.err.Error()
+		}
+		m.reloadCode()
+		if m.runOnSave {
+			return m.startRun()
+		}
+		return m, nil
+
+	case spinner.TickMsg:
+		var cmd tea.Cmd
+		m.spin, cmd = m.spin.Update(msg)
+		if m.running {
+			m.refreshResults()
+		}
+		return m, cmd
+	}
+
+	return m, nil
+}
+
+func (m *WorkspaceModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch {
+	case key.Matches(msg, m.keys.Quit):
+		m.watcher.Close()
+		return m, tea.Quit
+	case key.Matches(msg, m.keys.Back):
+		m.watcher.Close()
+		return m, tea.Quit // Phase 2: return to browse mode instead
+	case key.Matches(msg, m.keys.NextPane):
+		m.focused = m.focused.Next()
+		m.relayout()
+		return m, nil
+	case key.Matches(msg, m.keys.PrevPane):
+		m.focused = m.focused.Prev()
+		m.relayout()
+		return m, nil
+	case key.Matches(msg, m.keys.Zoom):
+		if m.mode == ModeZoom {
+			m.mode = ModeNormal
+		} else {
+			m.mode = ModeZoom
+		}
+		m.relayout()
+		return m, nil
+	case key.Matches(msg, m.keys.Edit):
+		return m, m.editCmd()
+	case key.Matches(msg, m.keys.Run):
+		return m.startRun()
+	case key.Matches(msg, m.keys.RunLC), key.Matches(msg, m.keys.Submit):
+		m.statusMsg = "run/submit on LeetCode lands in Phase 6"
+		return m, nil
+	case key.Matches(msg, m.keys.Tests):
+		m.statusMsg = "test-case manager lands in Phase 4 — edit testcases.jsonl for now"
+		return m, nil
+	case key.Matches(msg, m.keys.Up):
+		m.focusedViewport().LineUp(2)
+		return m, nil
+	case key.Matches(msg, m.keys.Down):
+		m.focusedViewport().LineDown(2)
+		return m, nil
+	case key.Matches(msg, m.keys.PageUp):
+		m.focusedViewport().ViewUp()
+		return m, nil
+	case key.Matches(msg, m.keys.PageDown):
+		m.focusedViewport().ViewDown()
+		return m, nil
+	}
+	return m, nil
+}
+
+func (m *WorkspaceModel) handleFileChange() (tea.Model, tea.Cmd) {
+	m.reloadCode()
+	m.statusMsg = "saved · " + time.Now().Format("15:04:05")
+	cmds := []tea.Cmd{m.waitForFileChange()}
+	if m.runOnSave {
+		m.runGen++
+		gen := m.runGen
+		cmds = append(cmds, tea.Tick(m.debounce, func(time.Time) tea.Msg {
+			return runDebounceMsg{gen: gen}
+		}))
+	}
+	return m, tea.Batch(cmds...)
+}
+
+// --- rendering ---------------------------------------------------------------
+
+func (m *WorkspaceModel) focusedViewport() *viewport.Model {
+	switch m.focused {
+	case PaneStatement:
+		return &m.statement
+	case PaneResults:
+		return &m.results
+	default:
+		return &m.code
+	}
+}
+
+func (m *WorkspaceModel) relayout() {
+	if m.width == 0 || m.height == 0 {
+		return
+	}
+	m.layout = Compute(m.width, m.height, m.focused, m.mode)
+
+	set := func(vp *viewport.Model, r Rect) {
+		iw, ih := innerSize(r)
+		if vp.Width == 0 && vp.Height == 0 {
+			*vp = viewport.New(iw, ih)
+			vp.MouseWheelEnabled = true
+		} else {
+			vp.Width, vp.Height = iw, ih
+		}
+	}
+	if m.layout.Tabbed {
+		set(m.focusedViewport(), m.layout.RectFor(m.focused))
+	} else {
+		set(&m.statement, m.layout.Statement)
+		set(&m.code, m.layout.Code)
+		set(&m.results, m.layout.Results)
+	}
+
+	m.refreshStatement()
+	m.refreshCode()
+	m.refreshResults()
+}
+
+// innerSize is the content area inside a pane's border and title row.
+func innerSize(r Rect) (w, h int) {
+	w = r.W - 2 // border
+	h = r.H - 3 // border (2) + title row (1)
+	if w < 1 {
+		w = 1
+	}
+	if h < 1 {
+		h = 1
+	}
+	return
+}
+
+func (m *WorkspaceModel) refreshStatement() {
+	w := m.statement.Width
+	if w < 1 {
+		return
+	}
+	if m.stmtRenderer == nil || m.stmtWidth != w {
+		r, err := glamour.NewTermRenderer(glamour.WithAutoStyle(), glamour.WithWordWrap(w))
+		if err == nil {
+			m.stmtRenderer = r
+			m.stmtWidth = w
+		}
+	}
+	body := m.q.Statement
+	if m.stmtRenderer != nil {
+		if out, err := m.stmtRenderer.Render(m.q.Statement); err == nil {
+			body = out
+		}
+	}
+	m.statement.SetContent(strings.TrimRight(body, "\n"))
+}
+
+func (m *WorkspaceModel) refreshCode() {
+	if m.code.Width < 1 {
+		return
+	}
+	m.code.SetContent(gutter(highlightCode(m.codeSrc, m.ws.Lang), m.th.Muted))
+}
+
+func (m *WorkspaceModel) refreshResults() {
+	if m.results.Width < 1 {
+		return
+	}
+	body := renderResults(m.th, m.lastRun, m.lastErr, m.running, m.spin.View(), m.results.Width)
+	m.results.SetContent(body)
+}
+
+func (m *WorkspaceModel) reloadCode() {
+	src, err := m.ws.ReadSolution()
+	if err != nil {
+		m.statusMsg = "reload failed: " + err.Error()
+		return
+	}
+	m.codeSrc = src
+	m.refreshCode()
+}
+
+// View implements tea.Model.
+func (m *WorkspaceModel) View() string {
+	if !m.ready {
+		return "loading workspace…"
+	}
+
+	var body string
+	if m.layout.Tabbed {
+		body = m.renderPane(m.focused, m.layout.RectFor(m.focused), true)
+	} else {
+		cols := lipgloss.JoinHorizontal(lipgloss.Top,
+			m.renderPane(PaneStatement, m.layout.Statement, m.focused == PaneStatement),
+			m.renderPane(PaneCode, m.layout.Code, m.focused == PaneCode),
+			m.renderPane(PaneResults, m.layout.Results, m.focused == PaneResults),
+		)
+		body = cols
+	}
+	return lipgloss.JoinVertical(lipgloss.Left, body, m.renderStatusBar())
+}
+
+func (m *WorkspaceModel) renderPane(p Pane, r Rect, focused bool) string {
+	if r.Empty() {
+		return ""
+	}
+	var vp viewport.Model
+	switch p {
+	case PaneStatement:
+		vp = m.statement
+	case PaneResults:
+		vp = m.results
+	default:
+		vp = m.code
+	}
+
+	title := m.paneTitle(p, focused)
+	inner := lipgloss.JoinVertical(lipgloss.Left, title, vp.View())
+
+	border := m.th.PaneBorder
+	if focused {
+		border = m.th.PaneBorderFocused
+	}
+	return border.Width(r.W - 2).Height(r.H - 2).Render(inner)
+}
+
+func (m *WorkspaceModel) paneTitle(p Pane, focused bool) string {
+	ts := m.th.Title
+	if focused {
+		ts = m.th.TitleFocused
+	}
+	if m.layout.Tabbed {
+		var parts []string
+		for _, q := range []Pane{PaneStatement, PaneCode, PaneResults} {
+			label := " " + q.String() + " "
+			if q == p {
+				parts = append(parts, m.th.TitleFocused.Render("["+q.String()+"]"))
+			} else {
+				parts = append(parts, m.th.Title.Render(label))
+			}
+		}
+		return strings.Join(parts, " ")
+	}
+
+	switch p {
+	case PaneStatement:
+		return ts.Render(fmt.Sprintf("%s  ", m.q.Title)) +
+			DifficultyStyle(m.q.Difficulty).Render(m.q.Difficulty)
+	case PaneCode:
+		return ts.Render(fmt.Sprintf("solution.%s", extOf(m.ws.SolutionPath)))
+	case PaneResults:
+		return ts.Render("Results")
+	}
+	return ts.Render(p.String())
+}
+
+func (m *WorkspaceModel) renderStatusBar() string {
+	if m.layout.Status.Empty() {
+		return ""
+	}
+	w := m.width
+
+	left := ""
+	if m.running {
+		left = m.th.Spinner.Render(m.spin.View()) + " running "
+	} else if m.statusMsg != "" {
+		left = m.statusMsg + "  "
+	}
+
+	var segs []string
+	for _, h := range m.keys.shortcutHints() {
+		segs = append(segs, m.th.StatusKey.Render(h.key)+m.th.StatusBar.Render(" "+h.desc))
+	}
+	hints := strings.Join(segs, m.th.StatusDivider.Render(" │ "))
+
+	line := left + hints
+	if lipgloss.Width(line) > w {
+		line = truncate(line, w)
+	}
+	return m.th.StatusBar.Width(w).Render(line)
+}
+
+func extOf(path string) string {
+	i := strings.LastIndexByte(path, '.')
+	if i < 0 {
+		return ""
+	}
+	return path[i+1:]
+}
+
+var _ tea.Model = (*WorkspaceModel)(nil)
