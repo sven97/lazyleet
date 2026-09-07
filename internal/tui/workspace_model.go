@@ -257,16 +257,16 @@ func (m *WorkspaceModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.statusMsg = "test-case manager lands in Phase 4 — edit testcases.jsonl for now"
 		return m, nil
 	case key.Matches(msg, m.keys.Up):
-		m.focusedViewport().LineUp(2)
+		m.focusedViewport().ScrollUp(2)
 		return m, nil
 	case key.Matches(msg, m.keys.Down):
-		m.focusedViewport().LineDown(2)
+		m.focusedViewport().ScrollDown(2)
 		return m, nil
 	case key.Matches(msg, m.keys.PageUp):
-		m.focusedViewport().ViewUp()
+		m.focusedViewport().PageUp()
 		return m, nil
 	case key.Matches(msg, m.keys.PageDown):
-		m.focusedViewport().ViewDown()
+		m.focusedViewport().PageDown()
 		return m, nil
 	}
 	return m, nil
