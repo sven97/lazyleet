@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"sort"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
@@ -29,48 +31,55 @@ func newSolveCmd(app *appContext) *cobra.Command {
 			"LeetCode (cached afterwards). No login needed for public problems.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			slug := args[0]
-
-			q, src, err := app.resolveQuestion(cmd.Context(), slug, refresh)
-			if err != nil {
-				return err
-			}
-			fmt.Fprintf(cmd.ErrOrStderr(), "loaded %s (%s)\n", slug, src)
-
-			if err := app.paths.EnsureDirs(); err != nil {
-				return err
-			}
-			if lang == "" {
-				lang = app.cfg.DefaultLanguage
-			}
-			if _, ok := q.CodeSnippets[lang]; !ok {
-				return fmt.Errorf("no %s starter for %s; available: %v", lang, slug, sortedKeys(q.CodeSnippets))
-			}
-
-			ws, err := workspace.Scaffold(app.paths.WorkspaceRoot, q, lang)
-			if err != nil {
-				return err
-			}
-
-			m, err := tui.NewWorkspaceModel(
-				ws, q,
-				app.cfg.ResolveEditor(),
-				app.cfg.Workspace.RunOnSave,
-				app.cfg.Workspace.RunDebounceMs,
-			)
-			if err != nil {
-				return err
-			}
-
-			p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
-			_, err = p.Run()
-			return err
+			return app.openWorkspace(cmd.Context(), args[0], lang, refresh)
 		},
 	}
 
 	cmd.Flags().StringVar(&lang, "lang", "", "language slug (default: config default_language)")
 	cmd.Flags().BoolVar(&refresh, "refresh", false, "bypass the local cache and refetch from LeetCode")
 	return cmd
+}
+
+// openWorkspace resolves a problem, scaffolds its workspace directory, and runs
+// the workspace TUI until the user exits it.
+func (a *appContext) openWorkspace(ctx context.Context, slug, lang string, refresh bool) error {
+	q, src, err := a.resolveQuestion(ctx, slug, refresh)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "loaded %s (%s)\n", slug, src)
+
+	if err := a.paths.EnsureDirs(); err != nil {
+		return err
+	}
+	if lang == "" {
+		lang = a.cfg.DefaultLanguage
+	}
+	if _, ok := q.CodeSnippets[lang]; !ok {
+		picked := pickLanguage(q.CodeSnippets, lang)
+		if picked == "" {
+			return fmt.Errorf("no starter code available for %s", slug)
+		}
+		fmt.Fprintf(os.Stderr, "no %s starter; using %s\n", lang, picked)
+		lang = picked
+	}
+
+	ws, err := workspace.Scaffold(a.paths.WorkspaceRoot, q, lang)
+	if err != nil {
+		return err
+	}
+
+	m, err := tui.NewWorkspaceModel(
+		ws, q,
+		a.cfg.ResolveEditor(),
+		a.cfg.Workspace.RunOnSave,
+		a.cfg.Workspace.RunDebounceMs,
+	)
+	if err != nil {
+		return err
+	}
+	_, err = tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion()).Run()
+	return err
 }
 
 // resolveQuestion returns problem detail from the first available source:
@@ -102,7 +111,7 @@ func (a *appContext) resolveQuestion(ctx context.Context, slug string, refresh b
 		return leetcode.Question{}, "", err
 	}
 	if err := db.PutProblemDetail(ctx, cacheFromQuestion(q)); err != nil {
-		fmt.Println("warning: could not cache problem detail:", err)
+		fmt.Fprintln(os.Stderr, "warning: could not cache problem detail:", err)
 	}
 	return q, "leetcode", nil
 }
@@ -144,10 +153,22 @@ func questionFromCache(d store.ProblemDetail, row store.Problem) leetcode.Questi
 	return q
 }
 
-func sortedKeys(m map[string]string) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
+// pickLanguage chooses a fallback language when the requested one has no
+// snippet: prefer the request, then python3, then the first alphabetically.
+func pickLanguage(snippets map[string]string, want string) string {
+	if _, ok := snippets[want]; ok {
+		return want
 	}
-	return out
+	if _, ok := snippets["python3"]; ok {
+		return "python3"
+	}
+	keys := make([]string, 0, len(snippets))
+	for k := range snippets {
+		keys = append(keys, k)
+	}
+	if len(keys) == 0 {
+		return ""
+	}
+	sort.Strings(keys)
+	return keys[0]
 }

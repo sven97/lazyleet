@@ -5,11 +5,11 @@ study plans, then solve them in a side-by-side workspace with a local test
 runner and one-key submit — in your own editor.
 
 > **Status: early development.** See [`PLAN.md`](PLAN.md) for the phase-by-phase
-> build plan, progress log, and findings. Phase 0 is done; the LeetCode API
-> client (Phase 1) reads problems, detail, and study plans from live LeetCode
-> and caches them; the "Tier C" coding workspace (statement + live solution
-> mirror + local Python test runner) works for any public problem. Browse mode
-> (Phase 2) and run/submit-to-LeetCode (Phase 6) are not built yet.
+> build plan, progress log, and findings. Working now: browse mode (`lazyleet`)
+> — a sources sidebar, a fuzzy-filterable problem list, study plans with
+> progress, and a live statement preview, all read from a local SQLite cache;
+> and the "Tier C" coding workspace (statement + live solution mirror + local
+> Python test runner). Run/submit-to-LeetCode (Phase 6) is not built yet.
 
 ## Building
 
@@ -25,7 +25,11 @@ Requires Go 1.27+. The SQLite driver is pure Go, so no C toolchain is needed.
 
 ```sh
 lazyleet sync                 # cache the full problem list + study plans locally
-lazyleet solve two-sum        # open the Tier C coding workspace for any problem
+lazyleet                      # browse mode: sidebar · fuzzy list · preview
+                              #   / filter · tab panes · enter opens workspace
+                              #   s sync · z zoom · ? help · q quit
+
+lazyleet solve two-sum        # jump straight into the workspace for one problem
 lazyleet solve valid-parentheses --lang python3
 lazyleet solve two-sum --refresh   # bypass the local cache
 
@@ -37,8 +41,6 @@ lazyleet debug list [--remote]     # cached (or live) problem list
 lazyleet debug problem <slug>      # fetch + print one problem's detail
 lazyleet debug plan leetcode-75    # print an official or bundled study plan
 lazyleet debug paths | debug config
-
-lazyleet                      # browse mode (Phase 2 — not built yet)
 lazyleet --version
 ```
 

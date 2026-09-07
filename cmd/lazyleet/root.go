@@ -47,14 +47,8 @@ func newRootCmd() *cobra.Command {
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			// Default action: launch the browse-mode TUI (Phase 2). For now,
-			// point at what exists.
-			fmt.Fprintln(cmd.OutOrStdout(),
-				"lazyleet "+versionString()+"\n\n"+
-					"Browse mode is not built yet (Phase 2).\n"+
-					"Try the coding workspace:  lazyleet solve two-sum\n"+
-					"Introspection:             lazyleet debug paths | debug config")
-			return nil
+			// Default action: the browse-mode TUI.
+			return runBrowse(&app)
 		},
 	}
 

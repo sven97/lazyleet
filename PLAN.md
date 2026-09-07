@@ -10,7 +10,7 @@ local test running and one-key submit — in the user's own editor.
 > **Plan Changes**. Keep companion research in `lazygit-ui-research.md` and
 > `leetcode-product-analysis.md`.
 
-Last updated: 2026-09-07 (Phase 1 LeetCode API read paths landed & verified live)
+Last updated: 2026-09-07 (Phase 2 browse-mode TUI landed)
 
 ---
 
@@ -220,25 +220,39 @@ run/submit are client-only (Phase 6 wires them). `internal/leetcode`.
       explicit `Accept-Encoding` not set).
 
 ### Phase 2 — Browse mode (product part 1)
-**Status: Not started**
+**Status: In progress** — usable read-only browser wired to the cache;
+`lazyleet` (no args) launches it. `internal/tui/browse_*.go`,
+`cmd/lazyleet/browse*.go`.
 
-- [ ] Layout engine: pure `(termW, termH, focusedPane, screenMode) -> rects`;
-      fixed/weight, `ROW`/`COLUMN`, collapse thresholds, portrait mode, screen
-      modes (`+` / `_`).
-- [ ] Panes: source selector (All Problems / Study Plans) · problem table ·
-      description preview · bottom shortcut bar.
-- [ ] Problem table: status glyph, frontend ID, title, acceptance %, difficulty
-      (color-coded). Selection index separate from scroll origin. Column sort.
-- [ ] Study plan view: pick plan → its problems + per-problem and overall
-      completion.
-- [ ] Fuzzy find: `/` filter, fzf-style match on id/title/tags; filter chips for
-      difficulty, status, tags, paid-only.
-- [ ] Description panel: HTML → terminal (html→markdown → glamour, or custom
-      renderer). Tabs: Description / Hints / Topics / Similar. Scrollable.
-- [ ] Context/keymap system: semantic actions, config-overridable keys,
-      generated shortcut bar.
-- [ ] Async loading with spinners.
-- [ ] **Deliverable:** usable read-only browser.
+- [x] Layout engine: pure `ComputeBrowse(termW, termH, focused, zoom)` — sidebar
+      (weighted, 18–30 cols) · list · preview (drops preview then sidebar as
+      width shrinks), 1-row status bar, `z` zoom to focused pane.
+- [x] Panes: sources sidebar (All Problems + bundled + official study plans) ·
+      problem list · statement preview · generated shortcut bar.
+- [x] Problem list: status glyph (✓/~/·), frontend id, difficulty letter
+      (color-coded), acceptance %, title (🔒 for paid). Cursor index separate
+      from scroll `top`; `g`/`G`, `ctrl+u`/`ctrl+d`.
+- [x] Study plan view: selecting a plan reorders the list to plan order and the
+      title shows `N/M solved`. Official plans fetched via `studyPlanV2Detail`
+      and cached; bundled from `internal/plans`.
+- [x] Fuzzy find: `/` opens a `textinput`; `sahilm/fuzzy` over `"id title"`;
+      `esc` clears. (Difficulty/status/tag filter *chips* not done — the store
+      supports the filters, no UI yet.)
+- [x] Preview: statement Markdown via glamour, lazy-loaded on cursor change
+      (120 ms debounce), cache→API. `]` toggles Statement / Topics tabs.
+      (Hints / Similar tabs not done — need those fields fetched.)
+- [x] Keymap + generated shortcut bar (`BrowseKeyMap`); `?` help overlay.
+      (Config key overrides not wired yet — `config.Keys` still unused.)
+- [x] Async loading with a spinner; empty cache → "press s to sync" + inline
+      sync.
+- [x] `Enter` on a problem sets `Chosen` and quits; `cmd/lazyleet` loops
+      browse → `openWorkspace` → browse. Sync core shared with `lazyleet sync`
+      (`synccore.go`).
+- [x] Tests: fake `BrowseData`, 6 model tests (render / cursor+open / fuzzy /
+      plan reorder+counts / empty-cache sync). `-race` + staticcheck clean.
+- [ ] Column sort, filter chips, Hints/Similar preview tabs, config-driven keys.
+- [ ] **Needs manual check in a real terminal** (pty capture unavailable in this
+      env) — same as Tier C.
 
 ### Phase 3 — Workspace scaffolding & editor integration
 **Status: In progress** — built ahead of Phase 1/2 to support the Tier C slice,
@@ -358,6 +372,16 @@ driven by `leetcode.Fixture` instead of the API. `internal/workspace`.
 
 Append newest entries at the top. One entry per working session or milestone.
 
+- **2026-09-07 (f)** — Phase 2 browse mode. `internal/tui`: `ComputeBrowse`
+  layout solver, `BrowseKeyMap`, `BrowseModel` (sidebar sources · fuzzy list ·
+  lazy statement preview) + `browse_view.go`. `BrowseData` interface keeps the
+  model decoupled from store/leetcode; `cmd/lazyleet/browsedata.go` implements
+  it, `browse.go` loops browse→workspace→browse, `synccore.go` shares the sync
+  logic with `lazyleet sync`. `solve.go` refactored to expose
+  `appContext.openWorkspace`. `lazyleet` (no args) now launches browse. Deps:
+  `sahilm/fuzzy`. 6 model tests via a fake `BrowseData`; `-race` + staticcheck
+  clean. Interactive render still needs a real-terminal eyeball (pty capture
+  doesn't work here). Not yet committed.
 - **2026-09-07 (e)** — Phase 1 read paths. `internal/leetcode`: GraphQL client
   (rate limit, retry, auth headers, `APIError`), `auth.go` (0600 creds),
   `ListProblems`/`ListAllProblems`, `QuestionDetail` (HTML→MD), `StudyPlanDetail`,
@@ -410,6 +434,13 @@ Append newest entries at the top. One entry per working session or milestone.
 Technical discoveries, gotchas, and things that changed our understanding.
 Append newest at the top; reference the phase/task.
 
+- **2026-09-07** (Phase 2) — Browse → workspace transition is a
+  loop-in-the-command, not a wrapper model: the browse `tea.Program` exits with
+  `BrowseModel.Chosen` set, `cmd/lazyleet` then runs the workspace program, and
+  loops back to a fresh browse program on exit. Simpler and robust; costs a
+  screen repaint between screens. From the workspace, `q`/`b` both return to
+  browse — there's no single-key "quit the whole app" from inside the workspace
+  yet.
 - **2026-09-07** (Phase 1) — LeetCode's `problemsetQuestionList` response does
   **not** include `questionId` (internal id) — only the frontend id. The
   internal id (needed for run/submit) comes from `questionData`. `UpsertProblems`
@@ -474,6 +505,10 @@ Record every material deviation from this plan: what changed, why, and the date.
   will need `charmbracelet/x/vt` + `creack/pty`; not blocking anything now.
 - **2026-09-07** — Test-case file is `testcases.jsonl`, not the two-file
   `testcases.txt`/`.local.txt` split originally planned (see Findings).
+- **2026-09-07** — Phase 2 shipped the core browser (sidebar + fuzzy list +
+  lazy preview + study-plan reorder/progress + inline sync) but deferred filter
+  *chips*, column sort, Hints/Similar preview tabs, and config-driven keybinds
+  to a later pass. `config.Keys` is still unused.
 - **2026-09-07** — Phase 1 built read paths + client-only run/submit, skipping
   `submissionList` history (moved to Phase 6). `solve <slug>` gained a
   fixture→cache→API resolver so it works for any public problem now, ahead of
