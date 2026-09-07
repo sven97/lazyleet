@@ -336,6 +336,12 @@ driven by `leetcode.Fixture` instead of the API. `internal/workspace`.
 
 Append newest entries at the top. One entry per working session or milestone.
 
+- **2026-09-07 (d)** — Committed and pushed. Repo:
+  `github.com/sven97/lazyleet` (private). Initial commit `de76f28` +
+  `a534b97` (staticcheck fix). CI green on GitHub Actions — `test` (gofmt,
+  vet, staticcheck, build, `test -race`) and `release-dryrun` (goreleaser
+  check + snapshot) both pass. Only annotation is GitHub's own
+  "Node 20 deprecated" notice on checkout/setup-go actions — cosmetic.
 - **2026-09-07 (c)** — Tier C workspace vertical slice. D2 resolved to Bubble
   Tea. New packages: `internal/testcase` (JSONL cases, parse/write, LC-example
   splitter), `internal/leetcode` (`Question`/`Meta` DTOs + a bundled `two-sum`
@@ -369,6 +375,11 @@ Append newest entries at the top. One entry per working session or milestone.
 Technical discoveries, gotchas, and things that changed our understanding.
 Append newest at the top; reference the phase/task.
 
+- **2026-09-07** (CI) — `bubbles/viewport` v1.0.0 deprecated
+  `LineUp/LineDown/ViewUp/ViewDown` in favour of
+  `ScrollUp/ScrollDown/PageUp/PageDown` (staticcheck SA1019). Local dev must
+  run `staticcheck ./...` (or `make lint`) before pushing — `go vet` does not
+  catch this.
 - **2026-09-07** (Phase 4/5) — Running the local judge as `python3 -c <harness>`
   (harness reads a JSON payload on stdin, `exec`s the user source) avoids
   writing a `_lazyleet_runner.py` into the workspace dir and keeps `import`
