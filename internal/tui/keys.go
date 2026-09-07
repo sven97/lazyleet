@@ -11,6 +11,7 @@ type KeyMap struct {
 	Run      key.Binding
 	RunLC    key.Binding
 	Submit   key.Binding
+	Import   key.Binding
 	Tests    key.Binding
 	Zoom     key.Binding
 	Up       key.Binding
@@ -31,6 +32,7 @@ func DefaultKeyMap() KeyMap {
 		Run:      key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "run local")),
 		RunLC:    key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "run @LC")),
 		Submit:   key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "submit")),
+		Import:   key.NewBinding(key.WithKeys("i"), key.WithHelp("i", "import failing case")),
 		Tests:    key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "tests")),
 		Zoom:     key.NewBinding(key.WithKeys("z", "+"), key.WithHelp("z", "zoom")),
 		Up:       key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑/k", "up")),
@@ -57,7 +59,6 @@ func (k KeyMap) shortcutHints() []hint {
 		{k.Run.Help().Key, k.Run.Help().Desc},
 		{k.RunLC.Help().Key, k.RunLC.Help().Desc},
 		{k.Submit.Help().Key, k.Submit.Help().Desc},
-		{k.Tests.Help().Key, k.Tests.Help().Desc},
 		{k.NextPane.Help().Key, k.NextPane.Help().Desc},
 		{k.Zoom.Help().Key, k.Zoom.Help().Desc},
 		{k.Back.Help().Key, k.Back.Help().Desc},

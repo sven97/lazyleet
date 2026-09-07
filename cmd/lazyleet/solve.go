@@ -74,6 +74,7 @@ func (a *appContext) openWorkspace(ctx context.Context, slug, lang string, refre
 		a.cfg.ResolveEditor(),
 		a.cfg.Workspace.RunOnSave,
 		a.cfg.Workspace.RunDebounceMs,
+		newRemoteJudge(a, q, lang),
 	)
 	if err != nil {
 		return err

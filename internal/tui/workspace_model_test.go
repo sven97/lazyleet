@@ -1,16 +1,41 @@
 package tui
 
 import (
+	"context"
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/sven97/lazyleet/internal/leetcode"
 	"github.com/sven97/lazyleet/internal/workspace"
 )
 
+// fakeRemote is a scripted RemoteJudge for tests.
+type fakeRemote struct {
+	available bool
+	run       RemoteOutcome
+	submit    RemoteOutcome
+	runCalls  int
+	subCalls  int
+}
+
+func (f *fakeRemote) Available() bool { return f.available }
+func (f *fakeRemote) Run(context.Context, string, string) (RemoteOutcome, error) {
+	f.runCalls++
+	return f.run, nil
+}
+func (f *fakeRemote) Submit(context.Context, string) (RemoteOutcome, error) {
+	f.subCalls++
+	return f.submit, nil
+}
+
 func newTestModel(t *testing.T) *WorkspaceModel {
+	return newTestModelWithRemote(t, nil)
+}
+
+func newTestModelWithRemote(t *testing.T, remote RemoteJudge) *WorkspaceModel {
 	t.Helper()
 	q, ok := leetcode.Fixture("two-sum")
 	if !ok {
@@ -20,7 +45,7 @@ func newTestModel(t *testing.T) *WorkspaceModel {
 	if err != nil {
 		t.Fatalf("Scaffold: %v", err)
 	}
-	m, err := NewWorkspaceModel(ws, q, "true", false, 400)
+	m, err := NewWorkspaceModel(ws, q, "true", false, 400, remote)
 	if err != nil {
 		t.Fatalf("NewWorkspaceModel: %v", err)
 	}
@@ -67,5 +92,98 @@ func TestWorkspaceModelZoomTogglesTabbed(t *testing.T) {
 	m = updated.(*WorkspaceModel)
 	if !m.layout.Tabbed {
 		t.Fatal("z should zoom to a tabbed (single-pane) layout")
+	}
+}
+
+func pressRune(m **WorkspaceModel, r rune) tea.Cmd {
+	updated, cmd := (*m).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	*m = updated.(*WorkspaceModel)
+	return cmd
+}
+
+// runCmd executes a command tree, feeding results back into the model. It drops
+// spinner ticks (which would recurse forever) and follow-up commands from run /
+// remote handlers are still delivered.
+func runCmd(m **WorkspaceModel, cmd tea.Cmd) {
+	if cmd == nil {
+		return
+	}
+	switch v := cmd().(type) {
+	case tea.BatchMsg:
+		for _, c := range v {
+			runCmd(m, c)
+		}
+	case spinner.TickMsg, nil:
+		// ignore
+	default:
+		updated, next := (*m).Update(v)
+		*m = updated.(*WorkspaceModel)
+		runCmd(m, next)
+	}
+}
+
+func TestWorkspaceRemoteUnavailableShowsHint(t *testing.T) {
+	m := newTestModelWithRemote(t, &fakeRemote{available: false})
+	pressRune(&m, 'R')
+	if !strings.Contains(m.statusMsg, "lazyleet auth") {
+		t.Fatalf("statusMsg = %q, want an auth hint", m.statusMsg)
+	}
+	if m.showRemote {
+		t.Fatal("should not switch to the remote view when unavailable")
+	}
+}
+
+func TestWorkspaceRemoteSubmitAcceptedRendersVerdict(t *testing.T) {
+	fr := &fakeRemote{
+		available: true,
+		submit: RemoteOutcome{
+			Kind: "submit", Verdict: "Accepted", Accepted: true,
+			Passed: 57, Total: 57, Runtime: "12 ms", RuntimePct: 95.3, Memory: "17 MB",
+		},
+	}
+	m := newTestModelWithRemote(t, fr)
+	m.Update(tea.WindowSizeMsg{Width: 140, Height: 40})
+
+	runCmd(&m, pressRune(&m, 's'))
+
+	if fr.subCalls != 1 {
+		t.Fatalf("Submit called %d times", fr.subCalls)
+	}
+	if !m.showRemote || m.remoteOut == nil || !m.remoteOut.Accepted {
+		t.Fatalf("remote outcome not recorded: showRemote=%v out=%+v", m.showRemote, m.remoteOut)
+	}
+	if v := m.results.View(); !strings.Contains(v, "Accepted") || !strings.Contains(v, "12 ms") {
+		t.Fatalf("results pane missing verdict:\n%s", v)
+	}
+}
+
+func TestWorkspaceImportFailingCaseAppendsAndRuns(t *testing.T) {
+	fr := &fakeRemote{
+		available: true,
+		run: RemoteOutcome{
+			Kind: "run", Verdict: "Wrong Answer (sample)", Accepted: false,
+			LastCase: "[1,5,9]\n14",
+		},
+	}
+	m := newTestModelWithRemote(t, fr)
+	m.Update(tea.WindowSizeMsg{Width: 140, Height: 40})
+
+	runCmd(&m, pressRune(&m, 'R')) // remote run -> Wrong Answer with a failing case
+	if m.remoteOut == nil || m.remoteOut.LastCase == "" {
+		t.Fatal("expected a failing case from the remote run")
+	}
+
+	before, _ := m.ws.ReadCases()
+	runCmd(&m, pressRune(&m, 'i')) // import it
+	after, err := m.ws.ReadCases()
+	if err != nil {
+		t.Fatalf("ReadCases: %v", err)
+	}
+	if len(after) != len(before)+1 {
+		t.Fatalf("case count %d -> %d, want +1", len(before), len(after))
+	}
+	last := after[len(after)-1]
+	if len(last.In) != 2 || last.In[0] != "[1,5,9]" || last.In[1] != "14" {
+		t.Fatalf("imported case wrong: %+v", last)
 	}
 }

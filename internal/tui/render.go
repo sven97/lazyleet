@@ -119,6 +119,70 @@ func renderResults(th Theme, res *runner.Result, runErr error, running bool, spi
 	return b.String()
 }
 
+// renderRemote formats a LeetCode run/submit outcome for the Results pane.
+func renderRemote(th Theme, kind string, out *RemoteOutcome, err error, running bool, spin string, width int) string {
+	verb := "running on LeetCode"
+	if kind == "submit" {
+		verb = "submitting to LeetCode"
+	}
+	switch {
+	case running:
+		return th.Spinner.Render(spin) + " " + verb + "…"
+	case err != nil:
+		return th.ErrorText.Render(verb+" failed: ") + err.Error()
+	case out == nil:
+		return th.Muted.Render("no LeetCode run yet — press R to run, s to submit")
+	}
+
+	var b strings.Builder
+	head := out.Verdict
+	if out.Total > 0 {
+		head += fmt.Sprintf("  %d/%d", out.Passed, out.Total)
+	}
+	if out.Accepted {
+		b.WriteString(th.Pass.Render("✓ " + head))
+	} else {
+		b.WriteString(th.Fail.Render("✗ " + head))
+	}
+	b.WriteString(th.Muted.Render("   [" + kind + " @ LeetCode]"))
+	b.WriteString("\n")
+
+	if out.Runtime != "" {
+		line := "  runtime  " + out.Runtime
+		if out.RuntimePct > 0 {
+			line += fmt.Sprintf("  (beats %.1f%%)", out.RuntimePct)
+		}
+		b.WriteString(th.Muted.Render(line) + "\n")
+	}
+	if out.Memory != "" {
+		line := "  memory   " + out.Memory
+		if out.MemoryPct > 0 {
+			line += fmt.Sprintf("  (beats %.1f%%)", out.MemoryPct)
+		}
+		b.WriteString(th.Muted.Render(line) + "\n")
+	}
+
+	if s := strings.TrimSpace(out.CompileErr); s != "" {
+		b.WriteString("\n" + th.Fail.Render("compile error") + "\n" + s + "\n")
+	}
+	if s := strings.TrimSpace(out.RuntimeErr); s != "" {
+		b.WriteString("\n" + th.Fail.Render("runtime error") + "\n" + s + "\n")
+	}
+
+	if !out.Accepted && strings.TrimSpace(out.LastCase) != "" {
+		b.WriteString("\n" + th.DiffDel.Render("failed on input") + "\n")
+		for _, ln := range strings.Split(strings.TrimRight(out.LastCase, "\n"), "\n") {
+			b.WriteString("  " + truncate(ln, width-3) + "\n")
+		}
+		b.WriteString(th.Muted.Render("press i to import this case as a local test") + "\n")
+	}
+	if !out.Accepted && len(out.Expected) > 0 && len(out.Actual) > 0 {
+		b.WriteString("\n" + th.DiffAdd.Render("  exp  ") + truncate(strings.Join(out.Expected, " | "), width-7) + "\n")
+		b.WriteString(th.DiffDel.Render("  got  ") + truncate(strings.Join(out.Actual, " | "), width-7) + "\n")
+	}
+	return b.String()
+}
+
 func truncate(s string, max int) string {
 	if max < 1 {
 		max = 1

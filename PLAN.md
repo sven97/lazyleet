@@ -10,7 +10,7 @@ local test running and one-key submit — in the user's own editor.
 > **Plan Changes**. Keep companion research in `lazygit-ui-research.md` and
 > `leetcode-product-analysis.md`.
 
-Last updated: 2026-09-07 (Phase 2 browse-mode TUI landed)
+Last updated: 2026-09-07 (Phase 6 run/submit wired into the workspace)
 
 ---
 
@@ -330,15 +330,27 @@ driven by `leetcode.Fixture` instead of the API. `internal/workspace`.
 - [ ] Results panel: per-case table, diff view for failures, aggregate + timing.
 
 ### Phase 6 — Run & Submit against LeetCode
-**Status: Not started**
+**Status: In progress** — run/submit + verdict + import-failing-case + mark-solved
+done; submission history panel deferred. `internal/tui` + `cmd/lazyleet`.
 
-- [ ] Wire Phase 1 run/submit into the workspace: spinner, poll, render verdict
-      (Accepted / Wrong Answer + last failed case / TLE / RE / CE) with runtime &
-      memory percentiles.
-- [ ] Remote Wrong Answer → one key imports the failing case as a local test.
-- [ ] Submission history panel; diff current code vs last accepted.
-- [ ] On Accepted: update problem status in cache → browse list and study-plan
-      progress reflect it.
+- [x] `tui.RemoteJudge` interface (`Available`/`Run`/`Submit`) + `RemoteOutcome`,
+      implemented by `cmd/lazyleet/remotejudge.go` over `*leetcode.Client`
+      (`Interpret`/`Submit` → `PollResult`). Nil / unauthenticated → `R`/`s`
+      show a `lazyleet auth` hint.
+- [x] Workspace `R` = Run Code (local test-case inputs as `data_input`),
+      `s` = Submit. Results pane swaps to a remote view: verdict (Accepted /
+      Wrong Answer / Compile Error / Runtime Error / sample pass), `N/M` cases,
+      runtime + memory with percentiles, failing input, exp/got. Spinner while
+      polling (90 s timeout).
+- [x] `i` imports the remote failing case into `testcases.jsonl`
+      (`workspace.AppendCases`, dedup by input) and kicks off a local run.
+- [x] On Accepted submit: `store.SetProblemStatus(slug, "ac")` → browse list and
+      study-plan `N/M solved` pick it up on next open.
+- [x] Tests: fake `RemoteJudge` — unavailable hint, submit-accepted verdict
+      render, import-failing-case appends + re-runs. `-race` + staticcheck clean.
+- [ ] Submission history panel; diff current code vs last accepted
+      (needs `submissionList` — deferred with Phase 1's history item).
+- [ ] Single-key "quit whole app" from the workspace (today `q`/`b` → browse).
 
 ### Phase 7 — Polish & distribution
 **Status: Not started**
@@ -372,6 +384,17 @@ driven by `leetcode.Fixture` instead of the API. `internal/workspace`.
 
 Append newest entries at the top. One entry per working session or milestone.
 
+- **2026-09-07 (g)** — Phase 6 run/submit. `tui.RemoteJudge` interface +
+  `RemoteOutcome` keep `internal/tui` transport-free; `cmd/lazyleet/
+  remotejudge.go` implements it over the LeetCode client (Interpret/Submit →
+  PollResult, maps `JudgeResult`). Workspace: `R` Run Code / `s` Submit with a
+  swappable remote Results view (verdict, N/M, runtime+memory percentiles,
+  failing input, exp/got), 90 s poll w/ spinner; `i` imports the failing case
+  into `testcases.jsonl` + re-runs locally; Accepted submit →
+  `store.SetProblemStatus(slug,"ac")`. New: `leetcode.JudgeResult.CorrectAnswer`
+  /`RunSuccess`, `workspace.AppendCases`, `store.SetProblemStatus`. 4 new tui
+  tests via a fake `RemoteJudge`. `-race` + staticcheck clean. Submission
+  history panel deferred. Not yet committed.
 - **2026-09-07 (f)** — Phase 2 browse mode. `internal/tui`: `ComputeBrowse`
   layout solver, `BrowseKeyMap`, `BrowseModel` (sidebar sources · fuzzy list ·
   lazy statement preview) + `browse_view.go`. `BrowseData` interface keeps the
@@ -434,6 +457,11 @@ Append newest entries at the top. One entry per working session or milestone.
 Technical discoveries, gotchas, and things that changed our understanding.
 Append newest at the top; reference the phase/task.
 
+- **2026-09-07** (Phase 6) — `interpret_solution` ("Run Code") returns
+  `correct_answer` / `run_success`, not a `status_msg` like submit does. The
+  outcome mapper special-cases `kind == "run"`: compile err → runtime err →
+  `correct_answer` → "Wrong Answer (sample)". `data_input` for the run is the
+  local test cases with every argument literal on its own line.
 - **2026-09-07** (Phase 2) — Browse → workspace transition is a
   loop-in-the-command, not a wrapper model: the browse `tea.Program` exits with
   `BrowseModel.Chosen` set, `cmd/lazyleet` then runs the workspace program, and

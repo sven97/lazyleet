@@ -24,6 +24,8 @@ type SubmitResult struct {
 type JudgeResult struct {
 	State             string   `json:"state"` // PENDING | STARTED | SUCCESS
 	StatusMsg         string   `json:"status_msg"`
+	RunSuccess        bool     `json:"run_success"`
+	CorrectAnswer     bool     `json:"correct_answer"` // set by interpret (Run Code)
 	TotalCorrect      int      `json:"total_correct"`
 	TotalTestcases    int      `json:"total_testcases"`
 	StatusRuntime     string   `json:"status_runtime"`

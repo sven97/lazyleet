@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/sven97/lazyleet/internal/leetcode"
@@ -111,6 +112,35 @@ func (w *Workspace) ReadCases() ([]testcase.Case, error) {
 	}
 	defer f.Close()
 	return testcase.Parse(f)
+}
+
+// AppendCases adds cases to the test-case file, skipping any whose inputs
+// exactly match an existing case.
+func (w *Workspace) AppendCases(add []testcase.Case) error {
+	existing, err := w.ReadCases()
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	seen := map[string]bool{}
+	for _, c := range existing {
+		seen[strings.Join(c.In, "\x00")] = true
+	}
+	merged := existing
+	for _, c := range add {
+		if k := strings.Join(c.In, "\x00"); !seen[k] {
+			seen[k] = true
+			merged = append(merged, c)
+		}
+	}
+	if len(merged) == len(existing) {
+		return nil
+	}
+	f, err := os.Create(w.TestsPath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return testcase.Write(f, merged)
 }
 
 func renderCases(cs []testcase.Case) []byte {

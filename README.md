@@ -8,8 +8,9 @@ runner and one-key submit — in your own editor.
 > build plan, progress log, and findings. Working now: browse mode (`lazyleet`)
 > — a sources sidebar, a fuzzy-filterable problem list, study plans with
 > progress, and a live statement preview, all read from a local SQLite cache;
-> and the "Tier C" coding workspace (statement + live solution mirror + local
-> Python test runner). Run/submit-to-LeetCode (Phase 6) is not built yet.
+> and the coding workspace — statement + live solution mirror + local Python
+> test runner, plus `R` run / `s` submit on LeetCode (with `lazyleet auth`) and
+> `i` to import a failing case as a local test.
 
 ## Building
 
@@ -47,11 +48,12 @@ lazyleet --version
 Problem data is read from a bundled fixture, then the local SQLite cache, then
 LeetCode (no login required for public problems; results are cached afterwards).
 
-In the workspace: `e` edit in `$EDITOR` · `r` run local tests · `tab` switch
-pane · `j`/`k` scroll · `z` zoom the focused pane · `q` quit. Saving the
-solution file (from `$EDITOR` or any other editor) re-runs the tests
-automatically. The workspace lives at
-`$XDG_DATA_HOME/lazyleet/workspace/1-two-sum/`.
+In the workspace: `e` edit in `$EDITOR` · `r` run local tests · `R` run on
+LeetCode · `s` submit · `i` import the last failing case · `tab` switch pane ·
+`j`/`k` scroll · `z` zoom · `q` back. Saving the solution file (from `$EDITOR`
+or any other editor) re-runs the local tests automatically. `R`/`s` need
+`lazyleet auth`. The workspace lives at
+`$XDG_DATA_HOME/lazyleet/workspace/<id>-<slug>/`.
 
 ## Configuration
 

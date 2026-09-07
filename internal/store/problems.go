@@ -166,6 +166,14 @@ FROM problems WHERE slug = ?`, slug).
 	return p, nil
 }
 
+// SetProblemStatus updates the solve status ("" | ac | notac) for one problem.
+// A no-op if the slug is not cached.
+func (s *Store) SetProblemStatus(ctx context.Context, slug, status string) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE problems SET status = ? WHERE slug = ?`, status, slug)
+	return err
+}
+
 // ProblemCount returns how many problem rows are cached.
 func (s *Store) ProblemCount(ctx context.Context) (int, error) {
 	var n int

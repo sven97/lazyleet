@@ -17,6 +17,7 @@ import (
 
 	"github.com/sven97/lazyleet/internal/leetcode"
 	"github.com/sven97/lazyleet/internal/runner"
+	"github.com/sven97/lazyleet/internal/testcase"
 	"github.com/sven97/lazyleet/internal/workspace"
 )
 
@@ -55,6 +56,14 @@ type WorkspaceModel struct {
 	lastRun   *runner.Result
 	lastErr   error
 
+	// remote run / submit against LeetCode
+	remote        RemoteJudge
+	remoteRunning bool
+	remoteKind    string // "run" | "submit"
+	remoteOut     *RemoteOutcome
+	remoteErr     error
+	showRemote    bool // Results pane is showing the remote outcome, not local
+
 	watcher   *workspace.Watcher
 	statusMsg string
 }
@@ -66,11 +75,15 @@ type runFinishedMsg struct {
 	err error
 }
 type editorFinishedMsg struct{ err error }
+type remoteDoneMsg struct {
+	out RemoteOutcome
+	err error
+}
 
 // NewWorkspaceModel builds the model. It starts the file watcher; call Close
 // (via the returned model after Run) is not needed — the watcher is closed when
 // the program exits through tea.Quit handling.
-func NewWorkspaceModel(ws *workspace.Workspace, q leetcode.Question, editor string, runOnSave bool, debounceMs int) (*WorkspaceModel, error) {
+func NewWorkspaceModel(ws *workspace.Workspace, q leetcode.Question, editor string, runOnSave bool, debounceMs int, remote RemoteJudge) (*WorkspaceModel, error) {
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
 
@@ -85,6 +98,7 @@ func NewWorkspaceModel(ws *workspace.Workspace, q leetcode.Question, editor stri
 		focused:   PaneCode,
 		mode:      ModeNormal,
 		spin:      sp,
+		remote:    remote,
 	}
 
 	if r, ok := runner.For(ws.Lang); ok {
@@ -158,9 +172,86 @@ func (m *WorkspaceModel) startRun() (tea.Model, tea.Cmd) {
 	m.runGen++
 	m.running = true
 	m.lastErr = nil
+	m.showRemote = false
 	m.statusMsg = ""
 	m.refreshResults()
 	return m, tea.Batch(m.runCmd(), m.spin.Tick)
+}
+
+func (m *WorkspaceModel) startRemote(kind string) (tea.Model, tea.Cmd) {
+	if m.remote == nil || !m.remote.Available() {
+		m.statusMsg = "run/submit on LeetCode needs `lazyleet auth`"
+		return m, nil
+	}
+	if m.remoteRunning {
+		return m, nil
+	}
+	m.remoteRunning = true
+	m.remoteKind = kind
+	m.remoteErr = nil
+	m.showRemote = true
+	m.statusMsg = ""
+	m.refreshResults()
+	return m, tea.Batch(m.remoteCmd(kind), m.spin.Tick)
+}
+
+func (m *WorkspaceModel) remoteCmd(kind string) tea.Cmd {
+	ws := m.ws
+	remote := m.remote
+	input := m.remoteDataInput()
+	return func() tea.Msg {
+		code, err := ws.ReadSolution()
+		if err != nil {
+			return remoteDoneMsg{err: err}
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+		defer cancel()
+		var out RemoteOutcome
+		if kind == "submit" {
+			out, err = remote.Submit(ctx, code)
+		} else {
+			out, err = remote.Run(ctx, code, input)
+		}
+		return remoteDoneMsg{out: out, err: err}
+	}
+}
+
+// remoteDataInput renders the local test cases as LeetCode's "Run Code" input:
+// every argument literal on its own line, cases concatenated.
+func (m *WorkspaceModel) remoteDataInput() string {
+	cases, err := m.ws.ReadCases()
+	if err != nil || len(cases) == 0 {
+		return strings.TrimSpace(m.q.ExampleTestcases)
+	}
+	var lines []string
+	for _, c := range cases {
+		lines = append(lines, c.In...)
+	}
+	return strings.Join(lines, "\n")
+}
+
+// importFailingCase appends the remote judge's failing test case to
+// testcases.jsonl and kicks off a local run.
+func (m *WorkspaceModel) importFailingCase() (tea.Model, tea.Cmd) {
+	if m.remoteOut == nil || strings.TrimSpace(m.remoteOut.LastCase) == "" {
+		m.statusMsg = "no failing case to import"
+		return m, nil
+	}
+	arity := m.q.Meta.Arity()
+	if arity <= 0 {
+		arity = 1
+	}
+	cases, err := testcase.FromLeetCodeExample(m.remoteOut.LastCase, arity)
+	if err != nil || len(cases) == 0 {
+		m.statusMsg = "could not parse the failing case"
+		return m, nil
+	}
+	if err := m.ws.AppendCases(cases); err != nil {
+		m.statusMsg = "import failed: " + err.Error()
+		return m, nil
+	}
+	m.statusMsg = fmt.Sprintf("imported %d case(s) → testcases.jsonl", len(cases))
+	return m.startRun()
 }
 
 // Update implements tea.Model.
@@ -210,10 +301,21 @@ func (m *WorkspaceModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case remoteDoneMsg:
+		m.remoteRunning = false
+		m.remoteErr = msg.err
+		if msg.err == nil {
+			o := msg.out
+			m.remoteOut = &o
+			m.statusMsg = m.remoteKind + ": " + o.Verdict
+		}
+		m.refreshResults()
+		return m, nil
+
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spin, cmd = m.spin.Update(msg)
-		if m.running {
+		if m.running || m.remoteRunning {
 			m.refreshResults()
 		}
 		return m, cmd
@@ -250,9 +352,12 @@ func (m *WorkspaceModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.editCmd()
 	case key.Matches(msg, m.keys.Run):
 		return m.startRun()
-	case key.Matches(msg, m.keys.RunLC), key.Matches(msg, m.keys.Submit):
-		m.statusMsg = "run/submit on LeetCode lands in Phase 6"
-		return m, nil
+	case key.Matches(msg, m.keys.RunLC):
+		return m.startRemote("run")
+	case key.Matches(msg, m.keys.Submit):
+		return m.startRemote("submit")
+	case key.Matches(msg, m.keys.Import):
+		return m.importFailingCase()
 	case key.Matches(msg, m.keys.Tests):
 		m.statusMsg = "test-case manager lands in Phase 4 — edit testcases.jsonl for now"
 		return m, nil
@@ -372,7 +477,12 @@ func (m *WorkspaceModel) refreshResults() {
 	if m.results.Width < 1 {
 		return
 	}
-	body := renderResults(m.th, m.lastRun, m.lastErr, m.running, m.spin.View(), m.results.Width)
+	var body string
+	if m.showRemote {
+		body = renderRemote(m.th, m.remoteKind, m.remoteOut, m.remoteErr, m.remoteRunning, m.spin.View(), m.results.Width)
+	} else {
+		body = renderResults(m.th, m.lastRun, m.lastErr, m.running, m.spin.View(), m.results.Width)
+	}
 	m.results.SetContent(body)
 }
 
