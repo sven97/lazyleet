@@ -10,7 +10,7 @@ local test running and one-key submit — in the user's own editor.
 > **Plan Changes**. Keep companion research in `lazygit-ui-research.md` and
 > `leetcode-product-analysis.md`.
 
-Last updated: 2026-09-08 (auth = browser-driven login via chromedp)
+Last updated: 2026-09-08 (auth: browser sign-in is the default; command tree tidied)
 
 ---
 
@@ -182,20 +182,17 @@ run/submit are client-only (Phase 6 wires them). `internal/leetcode`.
 - [x] GraphQL client (`client.go`): `X-Csrftoken` + `Referer` + `Origin` +
       `Cookie` headers, `rate.Limiter` (2 req/s), retry on 429/5xx with linear
       backoff, `APIError` type, per-region base URLs, functional options.
-- [x] `lazyleet auth login` — **browser-driven** (`internal/browserlogin` over
-      `chromedp`): opens a visible Chromium window at the LeetCode login page,
-      polls `network.GetCookies` over CDP until `LEETCODE_SESSION` + `csrftoken`
-      appear, verifies via `userStatus`, saves. Dedicated profile at
-      `<data-dir>/browser` (`--fresh` wipes it), `--browser-path` overrides
-      discovery. No OS keychain prompt, no cookie-file decryption. `browserlogin`
-      is intentionally a small reusable browser layer.
-- [x] `lazyleet auth` — **cookie scrape** (`internal/browsercookies` over
-      `browserutils/kooky`): reads the two cookies from an already-logged-in
-      browser, keychain-free ones (Firefox/Safari) first, `Pick` chooses one
-      browser+profile. `--browser <name>` restricts it (and allows keychain);
-      `auth browsers` lists detected stores (marks "· needs keychain");
-      `--manual` / `--stdin` are the paste fallbacks. `auth status` /
-      `auth logout` unchanged.
+- [x] Auth command tree (`auth.go` + `auth_login.go` + `auth_scrape.go`; shared
+      `finishAuth` save+verify+report):
+  - `lazyleet auth` / `auth login` — **browser sign-in** (`internal/browserlogin`,
+      verified working): plain browser subprocess, user passes Cloudflare, CDP
+      attached only after to read `storage.GetCookies`. Profile at
+      `<data-dir>/browser`, `--fresh`, `--browser-path`.
+  - `lazyleet auth import [--browser x]` — **cookie scrape**
+      (`internal/browsercookies` over `browserutils/kooky`): keychain-free
+      browsers first, `Pick` chooses one browser+profile.
+  - `lazyleet auth paste [--stdin]` — hidden prompt for the two values.
+  - `auth browsers` (marks "· needs keychain"), `auth status`, `auth logout`.
 - [x] Problem list (`problemsetQuestionList`), paginated
       (`ListProblems` / `ListAllProblems` with progress cb): frontend id, slug,
       title, difficulty, acRate, paidOnly, status, topic tags. `questionId` is
@@ -395,6 +392,14 @@ done; submission history panel deferred. `internal/tui` + `cmd/lazyleet`.
 
 Append newest entries at the top. One entry per working session or milestone.
 
+- **2026-09-08 (d)** — Auth cleanup. **Browser sign-in confirmed working** by
+  the user (v2 plain-subprocess approach passes Cloudflare). Command tree
+  reshaped: bare `lazyleet auth` = browser sign-in (was cookie scrape);
+  `auth login` is an explicit alias; `auth import` = kooky scrape (was bare
+  `auth` + `--browser`); `auth paste` = manual/`--stdin` (was `--manual`).
+  `auth.go` (331 lines) split into `auth.go` / `auth_login.go` /
+  `auth_scrape.go`; save+verify+report deduped into `finishAuth`. `-race` +
+  staticcheck clean.
 - **2026-09-08 (c)** — `lazyleet auth login`: browser-driven auth via
   `internal/browserlogin`. v1 used chromedp's allocator to launch the browser →
   Cloudflare hard-failed it (CDP fingerprint). v2: launch the browser as a
