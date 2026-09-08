@@ -29,12 +29,17 @@ const glamourMargin = 4
 
 // newStatementRenderer builds a glamour renderer whose output fits within
 // contentWidth cells.
+//
+// It uses a fixed "dark" style, NOT glamour.WithAutoStyle(): auto-style probes
+// the terminal background with an OSC query and reads stdin for the reply, which
+// steals keypresses when run (as we do) off the UI goroutine while bubbletea
+// owns the terminal.
 func newStatementRenderer(contentWidth int) *glamour.TermRenderer {
 	w := contentWidth - glamourMargin
 	if w < 20 {
 		w = 20
 	}
-	r, err := glamour.NewTermRenderer(glamour.WithAutoStyle(), glamour.WithWordWrap(w))
+	r, err := glamour.NewTermRenderer(glamour.WithStandardStyle("dark"), glamour.WithWordWrap(w))
 	if err != nil {
 		return nil
 	}
