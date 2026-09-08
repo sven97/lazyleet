@@ -49,7 +49,7 @@ func TestRenderStatementFitsWidth(t *testing.T) {
 		"Note that 1 does not map to any letters.\n\n" +
 		"- `1 <= digits.length <= 4`\n- `digits[i]` is a digit in the range `['2', '9']`.\n"
 	const width = 44
-	out := renderStatementMD(newStatementRenderer(width), md, width, nil)
+	out, _ := renderStatementMD(newStatementRenderer(width), md, width, nil)
 	for i, ln := range strings.Split(out, "\n") {
 		if w := ansi.StringWidth(ln); w > width {
 			t.Fatalf("line %d is %d cells wide (> %d): %q", i, w, width, ln)
@@ -59,7 +59,7 @@ func TestRenderStatementFitsWidth(t *testing.T) {
 
 func TestRenderStatementFallbackWhenNoImages(t *testing.T) {
 	md := "# Title\n\nSome text ![tree](https://assets.leetcode.com/uploads/t.png) end."
-	out := renderStatementMD(nil, md, 60, nil)
+	out, _ := renderStatementMD(nil, md, 60, nil)
 	if !strings.Contains(out, "⟨tree⟩") {
 		t.Errorf("expected ⟨tree⟩ placeholder, got:\n%s", out)
 	}
@@ -78,7 +78,7 @@ func TestRenderStatementInlinesKnownImage(t *testing.T) {
 		proto: termimg.ProtoBlocks,
 		byURL: map[string]*termimg.Image{"https://assets.leetcode.com/uploads/g.png": im},
 	}
-	out := renderStatementMD(nil, md, 60, imgs)
+	out, _ := renderStatementMD(nil, md, 60, imgs)
 	if strings.Contains(out, "⟨g⟩") {
 		t.Errorf("known image should not fall back to text:\n%s", out)
 	}

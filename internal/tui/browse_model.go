@@ -11,7 +11,6 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/glamour"
 	"github.com/sahilm/fuzzy"
 
 	"github.com/sven97/lazyleet/internal/termimg"
@@ -70,9 +69,11 @@ type BrowseModel struct {
 	previewErr     error
 	previewLoading bool
 	previewImages  *statementImages
-	stmtRenderer   *glamour.TermRenderer
-	stmtWidth      int
-	previewTab     int // 0 = statement, 1 = topics
+	previewCancel  context.CancelFunc // cancels the in-flight statement/image load
+	previewTab     int                // 0 = statement, 1 = topics
+	// rendered preview bodies keyed by slug|width|tab|hasImages (glamour is
+	// slow; keep re-visits and re-renders instant)
+	renderCache map[string]previewEntry
 
 	imgProto   termimg.Protocol
 	imgDir     string
@@ -90,8 +91,9 @@ type BrowseModel struct {
 }
 
 type browseLoadedMsg struct {
-	rows []BrowseRow
-	err  error
+	rows     []BrowseRow
+	lastSync time.Time
+	err      error
 }
 type plansLoadedMsg struct{ plans []PlanRef }
 type planSlugsMsg struct {
@@ -120,14 +122,15 @@ func NewBrowseModel(data BrowseData) *BrowseModel {
 	ti.Placeholder = "fuzzy filter id or title"
 
 	return &BrowseModel{
-		data:      data,
-		th:        DefaultTheme(),
-		keys:      DefaultBrowseKeyMap(),
-		focus:     RegionList,
-		filter:    ti,
-		spin:      sp,
-		planCache: map[string][]string{},
-		sources:   []sourceItem{{label: "All Problems", kind: srcAll}},
+		data:        data,
+		th:          DefaultTheme(),
+		keys:        DefaultBrowseKeyMap(),
+		focus:       RegionList,
+		filter:      ti,
+		spin:        sp,
+		planCache:   map[string][]string{},
+		renderCache: map[string]previewEntry{},
+		sources:     []sourceItem{{label: "All Problems", kind: srcAll}},
 	}
 }
 
@@ -140,7 +143,8 @@ func (m *BrowseModel) Init() tea.Cmd {
 func (m *BrowseModel) loadProblems() tea.Cmd {
 	return func() tea.Msg {
 		rows, err := m.data.ListProblems(context.Background())
-		return browseLoadedMsg{rows: rows, err: err}
+		t, _ := m.data.LastSync(context.Background())
+		return browseLoadedMsg{rows: rows, lastSync: t, err: err}
 	}
 }
 
@@ -161,9 +165,10 @@ func (m *BrowseModel) loadPlanSlugs(ref PlanRef) tea.Cmd {
 	}
 }
 
-func (m *BrowseModel) loadStatement(slug string) tea.Cmd {
+func (m *BrowseModel) loadStatement(ctx context.Context, slug string) tea.Cmd {
+	data := m.data
 	return func() tea.Msg {
-		md, err := m.data.LoadStatement(context.Background(), slug)
+		md, err := data.LoadStatement(ctx, slug)
 		return statementMsg{slug: slug, md: md, err: err}
 	}
 }
@@ -191,9 +196,13 @@ func (m *BrowseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
+		prevW := m.previewVP.Width
 		m.relayout()
 		m.ready = true
-		return m, nil
+		if m.previewVP.Width != prevW {
+			m.renderCache = map[string]previewEntry{}
+		}
+		return m, m.refreshPreviewContent()
 
 	case spinner.TickMsg:
 		var cmd tea.Cmd
@@ -206,8 +215,8 @@ func (m *BrowseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err == nil && len(msg.rows) == 0 {
 			m.statusMsg = "problem cache is empty — press s to sync"
 		}
-		if t, ok := m.data.LastSync(context.Background()); ok {
-			m.lastSync = t
+		if !msg.lastSync.IsZero() {
+			m.lastSync = msg.lastSync
 		}
 		m.rebuildView()
 		return m, m.debouncePreview()
@@ -231,11 +240,16 @@ func (m *BrowseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case previewDebounceMsg:
 		if msg.slug == m.currentSlug() && msg.slug != m.previewSlug {
+			if m.previewCancel != nil {
+				m.previewCancel() // abandon the previous load
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			m.previewCancel = cancel
 			m.previewSlug = msg.slug
 			m.previewErr = nil
 			m.previewLoading = true
 			m.previewImages = nil
-			return m, m.loadStatement(msg.slug)
+			return m, m.loadStatement(ctx, msg.slug)
 		}
 		return m, nil
 
@@ -248,15 +262,22 @@ func (m *BrowseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			return m, nil
 		}
-		m.renderPreview(msg.md)
-		return m, m.loadPreviewImagesCmd(msg.slug, msg.md)
+		m.previewMD = msg.md
+		return m, tea.Batch(m.refreshPreviewContent(), m.loadPreviewImagesCmd(msg.slug, msg.md))
 
 	case previewImagesMsg:
 		if msg.slug != m.previewSlug || len(msg.byURL) == 0 {
 			return m, nil
 		}
 		m.previewImages = &statementImages{proto: m.imgProto, byURL: msg.byURL}
-		m.refreshPreviewContent()
+		return m, m.refreshPreviewContent()
+
+	case previewRenderedMsg:
+		m.renderCache[msg.key] = previewEntry{content: msg.content, prefix: msg.prefix}
+		if msg.key == m.previewKey() {
+			m.previewVP.SetContent(msg.content)
+			m.imgWritten = queueImagePrefix(m.imgWriter, msg.prefix, m.imgWritten)
+		}
 		return m, nil
 
 	case syncDoneMsg:
@@ -315,7 +336,7 @@ func (m *BrowseModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.Zoom):
 		m.zoom = !m.zoom
 		m.relayout()
-		return m, nil
+		return m, m.refreshPreviewContent()
 
 	case key.Matches(msg, m.keys.NextPane):
 		m.focus = m.focus.next(m.layout.ShowSidebar, m.layout.ShowPreview)
@@ -332,8 +353,7 @@ func (m *BrowseModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case key.Matches(msg, m.keys.PreviewTab):
 		m.previewTab = (m.previewTab + 1) % 2
-		m.refreshPreviewContent()
-		return m, nil
+		return m, m.refreshPreviewContent()
 
 	case key.Matches(msg, m.keys.FilterDiff):
 		m.fltDiff = cycleDifficulty(m.fltDiff)
@@ -558,7 +578,6 @@ func (m *BrowseModel) relayout() {
 		m.previewVP.Width, m.previewVP.Height = pw, ph
 	}
 	m.filter.Width = m.layout.List.W - 6
-	m.refreshPreviewContent()
 	m.clampCursor()
 }
 
@@ -570,31 +589,46 @@ func (m *BrowseModel) EnableImages(proto termimg.Protocol, cacheDir string, iw *
 	m.imgWriter = iw
 }
 
-func (m *BrowseModel) renderPreview(md string) {
-	w := m.previewVP.Width
-	if w < 1 {
-		w = 60
-	}
-	if m.stmtRenderer == nil || m.stmtWidth != w {
-		if r := newStatementRenderer(w); r != nil {
-			m.stmtRenderer, m.stmtWidth = r, w
-		}
-	}
-	m.previewMD = md
-	m.refreshPreviewContent()
+type previewEntry struct {
+	content string
+	prefix  string
 }
 
-func (m *BrowseModel) refreshPreviewContent() {
+type previewRenderedMsg struct {
+	key     string
+	content string
+	prefix  string
+}
+
+func (m *BrowseModel) previewKey() string {
+	hasImg := m.previewImages != nil && len(m.previewImages.byURL) > 0
+	return fmt.Sprintf("%s|%d|%d|%t", m.previewSlug, m.previewVP.Width, m.previewTab, hasImg)
+}
+
+// refreshPreviewContent updates the preview pane. The topics tab is cheap and
+// rendered inline; the statement tab is glamour-rendered off the UI goroutine
+// (and cached), so navigating never blocks on it.
+func (m *BrowseModel) refreshPreviewContent() tea.Cmd {
 	if m.previewVP.Width < 1 {
-		return
+		return nil
 	}
 	if m.previewTab == 1 {
 		m.previewVP.SetContent(m.topicsBody())
-		return
+		return nil
 	}
-	body := renderStatementMD(m.stmtRenderer, m.previewMD, m.previewVP.Width, m.previewImages)
-	m.previewVP.SetContent(strings.TrimRight(body, "\n"))
-	m.imgWritten = queueImagePrefix(m.imgWriter, m.previewImages, m.imgWritten)
+	key := m.previewKey()
+	if e, ok := m.renderCache[key]; ok {
+		m.previewVP.SetContent(e.content)
+		m.imgWritten = queueImagePrefix(m.imgWriter, e.prefix, m.imgWritten)
+		return nil
+	}
+	// render asynchronously
+	md, width := m.previewMD, m.previewVP.Width
+	imgs := m.previewImages
+	return func() tea.Msg {
+		body, prefix := renderStatementMD(newStatementRenderer(width), md, width, imgs)
+		return previewRenderedMsg{key: key, content: strings.TrimRight(body, "\n"), prefix: prefix}
+	}
 }
 
 type previewImagesMsg struct {

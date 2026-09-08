@@ -14,12 +14,12 @@ import (
 // ImageWriter so they're emitted just before the next frame (they can't ride in
 // View — bubbletea truncates frame lines to the terminal width). `last` is the
 // blob queued previously; the returned value should be stored back to dedupe.
-func queueImagePrefix(iw *ImageWriter, si *statementImages, last string) string {
-	if iw == nil || si == nil || si.prefix == "" || si.prefix == last {
+func queueImagePrefix(iw *ImageWriter, prefix, last string) string {
+	if iw == nil || prefix == "" || prefix == last {
 		return last
 	}
-	iw.Queue(si.prefix)
-	return si.prefix
+	iw.Queue(prefix)
+	return prefix
 }
 
 // glamourMargin is how much wider than its word-wrap glamour's dark style can
@@ -63,14 +63,11 @@ func clampLines(s string, width int) string {
 // mdImageRe matches a Markdown image: group 1 = alt text, group 2 = URL.
 var mdImageRe = regexp.MustCompile(`!\[([^\]]*)\]\(([^)\s]+)[^)]*\)`)
 
-// statementImages holds decoded statement images keyed by URL, the terminal
-// protocol to render them with, and the Kitty transmit+placement prefix that
-// renderStatementMD produced for the current width (emitted once as a frame
-// prefix so it isn't clipped by a viewport).
+// statementImages holds decoded statement images keyed by URL and the terminal
+// protocol to render them with.
 type statementImages struct {
-	proto  termimg.Protocol
-	byURL  map[string]*termimg.Image
-	prefix string
+	proto termimg.Protocol
+	byURL map[string]*termimg.Image
 }
 
 // imageURLs returns the distinct image URLs referenced in a markdown statement.
@@ -88,10 +85,13 @@ func imageURLs(md string) []string {
 
 // renderStatementMD renders a Markdown statement with glamour. When images are
 // available and the protocol supports them, each image reference is replaced by
-// an inline image block; otherwise it degrades to "⟨alt⟩" text. For the Kitty
-// protocol it also fills imgs.prefix with the transmit+placement escapes the
-// caller must emit as a frame prefix.
-func renderStatementMD(r *glamour.TermRenderer, md string, contentWidth int, imgs *statementImages) string {
+// an inline image block; otherwise it degrades to "⟨alt⟩" text. It returns the
+// rendered body and, for the Kitty protocol, the transmit+placement escape
+// prefix the caller must emit ahead of the frame.
+//
+// This is CPU-heavy (glamour + chroma + PNG-to-placeholder) — call it off the
+// UI goroutine.
+func renderStatementMD(r *glamour.TermRenderer, md string, contentWidth int, imgs *statementImages) (body, prefix string) {
 	render := func(s string) string {
 		if r == nil {
 			return s
@@ -104,11 +104,8 @@ func renderStatementMD(r *glamour.TermRenderer, md string, contentWidth int, img
 	}
 
 	locs := mdImageRe.FindAllStringSubmatchIndex(md, -1)
-	if imgs != nil {
-		imgs.prefix = ""
-	}
 	if len(locs) == 0 {
-		return clampLines(render(md), contentWidth)
+		return clampLines(render(md), contentWidth), ""
 	}
 
 	inline := imgs != nil && imgs.proto != termimg.ProtoNone
@@ -120,7 +117,7 @@ func renderStatementMD(r *glamour.TermRenderer, md string, contentWidth int, img
 		imgW = 8
 	}
 
-	var b, prefix strings.Builder
+	var b, pfx strings.Builder
 	last := 0
 	for _, m := range locs {
 		whole0, whole1 := m[0], m[1]
@@ -140,7 +137,7 @@ func renderStatementMD(r *glamour.TermRenderer, md string, contentWidth int, img
 			var block string
 			if imgs.proto == termimg.ProtoKitty {
 				block, _ = im.Placeholders(imgW)
-				prefix.WriteString(im.Transmit(imgW)) // emitted as a frame prefix, not clipped
+				pfx.WriteString(im.Transmit(imgW)) // emitted ahead of the frame, not clipped
 			} else {
 				block, _ = im.Render(imgs.proto, imgW)
 			}
@@ -159,8 +156,5 @@ func renderStatementMD(r *glamour.TermRenderer, md string, contentWidth int, img
 	if seg := md[last:]; strings.TrimSpace(seg) != "" {
 		b.WriteString(render(seg))
 	}
-	if imgs != nil {
-		imgs.prefix = prefix.String()
-	}
-	return b.String()
+	return b.String(), pfx.String()
 }

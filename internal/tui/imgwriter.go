@@ -16,8 +16,12 @@ import (
 // interface (Read/Write/Close/Fd) that bubbletea still detects a TTY and emits
 // WindowSizeMsg.
 type ImageWriter struct {
-	f       *os.File
-	mu      sync.Mutex
+	f *os.File
+
+	// pmu guards only the pending buffer — held briefly for a swap, never
+	// during the (possibly blocking) file write, so Queue can't stall the
+	// Update loop behind a backpressured terminal.
+	pmu     sync.Mutex
 	pending []byte
 }
 
@@ -29,19 +33,21 @@ func (iw *ImageWriter) Queue(b string) {
 	if b == "" {
 		return
 	}
-	iw.mu.Lock()
+	iw.pmu.Lock()
 	iw.pending = append(iw.pending, b...)
-	iw.mu.Unlock()
+	iw.pmu.Unlock()
 }
 
 func (iw *ImageWriter) Write(p []byte) (int, error) {
-	iw.mu.Lock()
-	defer iw.mu.Unlock()
-	if len(iw.pending) > 0 {
-		if _, err := iw.f.Write(iw.pending); err != nil {
+	iw.pmu.Lock()
+	pend := iw.pending
+	iw.pending = nil
+	iw.pmu.Unlock()
+
+	if len(pend) > 0 {
+		if _, err := iw.f.Write(pend); err != nil {
 			return 0, err
 		}
-		iw.pending = iw.pending[:0]
 	}
 	return iw.f.Write(p)
 }

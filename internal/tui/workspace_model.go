@@ -527,9 +527,9 @@ func (m *WorkspaceModel) refreshStatement() {
 			m.stmtWidth = w
 		}
 	}
-	body := renderStatementMD(m.stmtRenderer, m.q.Statement, w, m.stmtImages)
+	body, prefix := renderStatementMD(m.stmtRenderer, m.q.Statement, w, m.stmtImages)
 	m.statement.SetContent(strings.TrimRight(body, "\n"))
-	m.imgWritten = queueImagePrefix(m.imgWriter, m.stmtImages, m.imgWritten)
+	m.imgWritten = queueImagePrefix(m.imgWriter, prefix, m.imgWritten)
 }
 
 func (m *WorkspaceModel) refreshCode() {
