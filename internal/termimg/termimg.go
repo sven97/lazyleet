@@ -32,10 +32,9 @@ import (
 )
 
 // maxSide caps the longest edge of the re-encoded image so the Kitty transmit
-// payload stays small (a LeetCode diagram → ~15–30 KB PNG). The transmit
-// sequence is re-sent on every render while the image's first row is on screen,
-// so this trades a little sharpness for scroll smoothness.
-const maxSide = 512
+// payload stays modest (a LeetCode diagram → ~40–90 KB PNG). The transmit is
+// sent once as a frame prefix, not through the scrollable viewport.
+const maxSide = 420
 
 // Protocol is the chosen rendering backend.
 type Protocol int
@@ -122,9 +121,10 @@ func Decode(data []byte) (*Image, error) {
 	return im, nil
 }
 
-// Render returns a string to embed in a view and the number of terminal rows it
-// occupies. cols is the target width in cells; the height follows the aspect
-// ratio (assuming cells are ~twice as tall as wide).
+// Render returns a fully self-contained image string (transmit + display) and
+// the number of terminal rows it occupies. Use this only where the output goes
+// straight to the terminal; inside a scrollable TUI use Transmit + Placeholders
+// separately so the transmit escape isn't clipped by a viewport.
 func (im *Image) Render(proto Protocol, cols int) (body string, rows int) {
 	if im == nil || cols < 1 {
 		return "", 0
@@ -135,12 +135,44 @@ func (im *Image) Render(proto Protocol, cols int) (body string, rows int) {
 	rows = im.rowsFor(cols)
 	switch proto {
 	case ProtoKitty:
-		return im.kitty(cols, rows), rows
+		ph, _ := im.Placeholders(cols)
+		return im.Transmit() + ph, rows
 	case ProtoBlocks:
 		return im.blocks(cols, rows), rows
 	default:
 		return "", 0
 	}
+}
+
+// Transmit is the Kitty "transmit only" escape sequence carrying the PNG
+// payload. It must be emitted once outside any viewport (e.g. as a frame
+// prefix), never clipped.
+func (im *Image) Transmit() string {
+	if im == nil {
+		return ""
+	}
+	return kittyTransmit(im.id, im.png)
+}
+
+// Placeholders returns just the Kitty Unicode-placeholder grid (no transmit)
+// and the row count. Safe to put inside scrollable content.
+func (im *Image) Placeholders(cols int) (body string, rows int) {
+	if im == nil || cols < 1 {
+		return "", 0
+	}
+	if cols > 200 {
+		cols = 200
+	}
+	rows = im.rowsFor(cols)
+	return im.kittyPlaceholders(cols, rows), rows
+}
+
+// ID is the Kitty image id (stable per content).
+func (im *Image) ID() uint32 {
+	if im == nil {
+		return 0
+	}
+	return im.id
 }
 
 func (im *Image) rowsFor(cols int) int {

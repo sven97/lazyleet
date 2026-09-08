@@ -581,7 +581,10 @@ func (m *WorkspaceModel) View() string {
 		)
 		body = cols
 	}
-	return lipgloss.JoinVertical(lipgloss.Left, body, m.renderStatusBar())
+	frame := lipgloss.JoinVertical(lipgloss.Left, body, m.renderStatusBar())
+	// Kitty image data is transmitted once as a frame prefix; the diffing
+	// renderer only re-sends it when line 0 changes (resize / full repaint).
+	return m.stmtImages.transmitPrefix() + frame
 }
 
 func (m *WorkspaceModel) renderPane(p Pane, r Rect, focused bool) string {

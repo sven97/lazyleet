@@ -31,25 +31,22 @@ func diacritic(i int) rune {
 	return rowColumnDiacritics[i]
 }
 
-// kitty renders the image as a Kitty transmit sequence (on the first line)
-// followed by rows of Unicode placeholder cells. The image id is carried in the
-// 24-bit foreground colour of the cells.
-func (im *Image) kitty(cols, rows int) string {
+// kittyPlaceholders renders rows of Unicode placeholder cells (no transmit).
+// The image id is carried in the 24-bit foreground colour of the cells; the
+// first cell of each row carries explicit row/column diacritics and the rest of
+// the row auto-increments the column.
+func (im *Image) kittyPlaceholders(cols, rows int) string {
 	var b strings.Builder
-	b.Grow(len(im.png)/3*4 + cols*rows*4 + 256)
+	b.Grow(cols*rows*4 + rows*16)
 
 	fg := kittyFG(im.id)
 	const reset = "\x1b[39m"
 
 	for r := 0; r < rows; r++ {
-		if r == 0 {
-			b.WriteString(kittyTransmit(im.id, im.png))
-		} else {
+		if r > 0 {
 			b.WriteByte('\n')
 		}
 		b.WriteString(fg)
-		// first cell carries the explicit row (and column 0) diacritics;
-		// the rest of the row auto-increments the column.
 		b.WriteString(placeholder)
 		b.WriteRune(diacritic(r))
 		b.WriteRune(diacritic(0))

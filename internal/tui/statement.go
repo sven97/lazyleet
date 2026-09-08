@@ -37,7 +37,8 @@ func clampLines(s string, width int) string {
 	}
 	lines := strings.Split(s, "\n")
 	for i, ln := range lines {
-		if strings.Contains(ln, "\x1b_G") { // Kitty graphics — never truncate
+		// never touch image lines: Kitty transmit (\x1b_G) or a placeholder grid
+		if strings.Contains(ln, "\x1b_G") || strings.Contains(ln, "\U0010EEEE") {
 			continue
 		}
 		if ansi.StringWidth(ln) > width {
@@ -55,6 +56,20 @@ var mdImageRe = regexp.MustCompile(`!\[([^\]]*)\]\(([^)\s]+)[^)]*\)`)
 type statementImages struct {
 	proto termimg.Protocol
 	byURL map[string]*termimg.Image
+}
+
+// transmitPrefix returns the Kitty transmit sequences for every image, to be
+// emitted once as a frame prefix (outside any viewport, so it isn't clipped).
+// Empty for the block protocol.
+func (si *statementImages) transmitPrefix() string {
+	if si == nil || si.proto != termimg.ProtoKitty {
+		return ""
+	}
+	var b strings.Builder
+	for _, im := range si.byURL {
+		b.WriteString(im.Transmit())
+	}
+	return b.String()
 }
 
 // imageURLs returns the distinct image URLs referenced in a markdown statement.
@@ -116,9 +131,14 @@ func renderStatementMD(r *glamour.TermRenderer, md string, contentWidth int, img
 			im = imgs.byURL[url]
 		}
 		if im != nil {
-			body, _ := im.Render(imgs.proto, imgW)
+			var block string
+			if imgs.proto == termimg.ProtoKitty {
+				block, _ = im.Placeholders(imgW) // transmit is emitted as a frame prefix
+			} else {
+				block, _ = im.Render(imgs.proto, imgW)
+			}
 			b.WriteString("\n")
-			b.WriteString(body)
+			b.WriteString(block)
 			b.WriteString("\n\n")
 		} else {
 			label := strings.TrimSpace(alt)

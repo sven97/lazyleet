@@ -33,7 +33,12 @@ func (m *BrowseModel) View() string {
 		}
 		body = lipgloss.JoinHorizontal(lipgloss.Top, cols...)
 	}
-	return lipgloss.JoinVertical(lipgloss.Left, body, m.renderStatusBar())
+	frame := lipgloss.JoinVertical(lipgloss.Left, body, m.renderStatusBar())
+	// Kitty image data goes out once as a frame prefix (see statementImages).
+	if m.layout.ShowPreview && m.previewTab == 0 {
+		return m.previewImages.transmitPrefix() + frame
+	}
+	return frame
 }
 
 func (m *BrowseModel) zoomInnerH() int {

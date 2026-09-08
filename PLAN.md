@@ -401,6 +401,11 @@ done; submission history panel deferred. `internal/tui` + `cmd/lazyleet`.
 
 Append newest entries at the top. One entry per working session or milestone.
 
+- **2026-09-08 (h)** — Kitty image blank-gap fix. The transmit escape was being
+  clipped by `bubbles/viewport` (it truncates lines to its width). Split
+  `Image.Transmit()` / `Image.Placeholders()`; placeholders go in the viewport,
+  the transmit is a `View()` frame prefix (re-sent only when line 0 changes via
+  bubbletea's diff). `maxSide` 512→420. `-race` + staticcheck clean.
 - **2026-09-08 (g)** — Statement wrap bug + browse-preview images. glamour's
   dark style renders ~4 cells wider than its word-wrap (document margin + block
   indents), so preview lines overflowed the pane and the terminal clipped them
@@ -534,11 +539,14 @@ Append newest at the top; reference the phase/task.
 - **2026-09-08** (images) — inline images in a Bubble Tea viewport: only Kitty
   **Unicode placeholders** keep the renderer's row accounting correct (iTerm2 /
   Kitty direct placement move the cursor in ways bubbletea doesn't track →
-  clobbered on redraw). The transmit sequence rides on line 0 of the image block
-  inside the scrollable content, so it re-sends every render while visible;
-  `q=2` silences it and ~20–30 KB is fine for input-driven redraws. If
-  held-scroll stutters, split transmit from placeholders and send it once as a
-  `View()` prefix.
+  clobbered on redraw). v1 put the transmit escape on line 0 of the image block
+  *inside* the viewport content → **`bubbles/viewport` truncates lines to its
+  width**, chopping the ~120 KB base64 → corrupt image → a blank gap the size of
+  the image. v2: `Image.Transmit()` (escape) and `Image.Placeholders()` (grid)
+  are separate; placeholders (short rows, `x/ansi` width 1) go in the viewport,
+  the transmit is emitted as a **`View()` frame prefix** — bubbletea's line diff
+  only re-sends it when line 0 changes (new previewed problem, resize, full
+  repaint), so effectively once. `maxSide` 420.
 - **2026-09-08** (auth) — Cloudflare Turnstile **hard-fails** ("Verification
   failed") any browser with a CDP client attached at launch — chromedp's
   `NewExecAllocator`+`NewContext` sets `--enable-automation` / `navigator.
