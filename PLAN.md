@@ -401,6 +401,14 @@ done; submission history panel deferred. `internal/tui` + `cmd/lazyleet`.
 
 Append newest entries at the top. One entry per working session or milestone.
 
+- **2026-09-08 (l)** — Navigation-freeze while loading, take 2. The async
+  preview render built its glamour renderer per-render with
+  `glamour.WithAutoStyle()`, which **probes the terminal background (OSC query)
+  and reads stdin for the reply** — off the UI goroutine, so it ate the user's
+  keypresses and navigation looked frozen until a statement finished loading.
+  Fixed: `glamour.WithStandardStyle("dark")` (no query, no stdin). Also added
+  `previewContentSlug` so an uncached row shows a "loading" spinner instead of
+  the previously-viewed statement, and `GotoTop()` on each new statement.
 - **2026-09-08 (k)** — Browse responsiveness. The event loop did synchronous
   work in handlers — glamour+chroma statement render in `statementMsg`, a SQLite
   `LastSync` in `browseLoadedMsg` — so navigation/quit blocked while a problem
@@ -552,6 +560,11 @@ Append newest entries at the top. One entry per working session or milestone.
 Technical discoveries, gotchas, and things that changed our understanding.
 Append newest at the top; reference the phase/task.
 
+- **2026-09-08** (tui) — never call `glamour.WithAutoStyle()` (or anything that
+  probes the terminal / reads stdin) once bubbletea is running — it steals
+  keypresses. Use `glamour.WithStandardStyle("dark")`. Same rule as the
+  `browserlogin`/keychain lesson: keep terminal-owning side effects out of
+  background work.
 - **2026-09-08** (images) — inline images in a Bubble Tea viewport: only Kitty
   **Unicode placeholders** keep the renderer's row accounting correct (iTerm2 /
   Kitty direct placement move the cursor in ways bubbletea doesn't track →
