@@ -401,6 +401,15 @@ done; submission history panel deferred. `internal/tui` + `cmd/lazyleet`.
 
 Append newest entries at the top. One entry per working session or milestone.
 
+- **2026-09-08 (k)** — Browse responsiveness. The event loop did synchronous
+  work in handlers — glamour+chroma statement render in `statementMsg`, a SQLite
+  `LastSync` in `browseLoadedMsg` — so navigation/quit blocked while a problem
+  detail loaded (compounded by Cloudflare-retried loads piling up).
+  `renderStatementMD` now returns `(body, prefix)` and the browse preview
+  renders in a `tea.Cmd`, cached by `slug|width|tab|hasImages`. `LastSync`
+  moved into the load cmd. `previewDebounceMsg` cancels the prior load's
+  context (30s cap) so superseded fetches stop hogging the 2 req/s limiter.
+  `ImageWriter.Queue` holds only a brief lock.
 - **2026-09-08 (h/i/j)** — Kitty image blank-gap: three stacked bugs.
   (h) transmit escape clipped by `bubbles/viewport`. (i) missing the
   Unicode-placeholder **virtual-placement** command
