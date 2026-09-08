@@ -196,11 +196,17 @@ func (m *BrowseModel) previewTitle() string {
 }
 
 func (m *BrowseModel) previewBody() string {
+	if m.previewTab == 1 {
+		return m.previewVP.View() // topics — derived from the row, always current
+	}
+	// The viewport still holds the previously shown statement until the new
+	// one is fetched and rendered; don't show stale content for the wrong row.
+	stale := m.previewContentSlug != m.currentSlug()
 	switch {
-	case m.previewLoading:
-		return m.th.Spinner.Render(m.spin.View()) + " loading statement…"
-	case m.previewErr != nil:
+	case m.previewErr != nil && !stale:
 		return m.th.ErrorText.Render("could not load: ") + m.previewErr.Error()
+	case m.previewLoading || stale:
+		return m.th.Spinner.Render(m.spin.View()) + " loading statement…"
 	default:
 		return m.previewVP.View()
 	}

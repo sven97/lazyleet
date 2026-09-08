@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -183,6 +184,53 @@ func TestBrowseStructuredFilterAndSort(t *testing.T) {
 	step(&m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'S'}})
 	if m.sortMode == sortByID {
 		t.Fatal("S should advance the sort mode")
+	}
+}
+
+func TestBrowsePreviewShowsLoadingUntilCurrentRendered(t *testing.T) {
+	m, _ := bootBrowse(t)
+
+	// fresh: nothing rendered for the selected row yet
+	if !strings.Contains(m.previewBody(), "loading") {
+		t.Fatalf("expected a loading state before any statement is rendered:\n%s", m.previewBody())
+	}
+
+	// deliver + render the statement for the current row
+	m.previewSlug = m.currentSlug()
+	updated, cmd := m.Update(statementMsg{slug: m.currentSlug(), md: "# Two Sum\n\nGiven an array."})
+	m = updated.(*BrowseModel)
+	runBrowseCmd(&m, cmd) // refreshPreviewContent -> previewRenderedMsg
+
+	if m.previewContentSlug != "two-sum" {
+		t.Fatalf("previewContentSlug = %q, want two-sum", m.previewContentSlug)
+	}
+	if strings.Contains(m.previewBody(), "loading") {
+		t.Fatalf("current statement rendered; should not show loading:\n%s", m.previewBody())
+	}
+
+	// navigate to another row — preview must not keep showing the old one
+	step(&m, tea.KeyMsg{Type: tea.KeyDown})
+	if !strings.Contains(m.previewBody(), "loading") {
+		t.Fatalf("after moving to an unrendered row, expected loading, got:\n%s", m.previewBody())
+	}
+}
+
+// runBrowseCmd executes a browse command tree, feeding results back into the
+// model (spinner ticks dropped).
+func runBrowseCmd(m **BrowseModel, cmd tea.Cmd) {
+	if cmd == nil {
+		return
+	}
+	switch v := cmd().(type) {
+	case tea.BatchMsg:
+		for _, c := range v {
+			runBrowseCmd(m, c)
+		}
+	case spinner.TickMsg, nil:
+	default:
+		updated, next := (*m).Update(v)
+		*m = updated.(*BrowseModel)
+		runBrowseCmd(m, next)
 	}
 }
 

@@ -63,14 +63,15 @@ type BrowseModel struct {
 	filtering bool
 	filter    textinput.Model
 
-	previewSlug    string
-	previewMD      string
-	previewVP      viewport.Model
-	previewErr     error
-	previewLoading bool
-	previewImages  *statementImages
-	previewCancel  context.CancelFunc // cancels the in-flight statement/image load
-	previewTab     int                // 0 = statement, 1 = topics
+	previewSlug        string
+	previewMD          string
+	previewVP          viewport.Model
+	previewErr         error
+	previewLoading     bool
+	previewImages      *statementImages
+	previewCancel      context.CancelFunc // cancels the in-flight statement/image load
+	previewContentSlug string             // slug whose statement is currently in the viewport
+	previewTab         int                // 0 = statement, 1 = topics
 	// rendered preview bodies keyed by slug|width|tab|hasImages (glamour is
 	// slow; keep re-visits and re-renders instant)
 	renderCache map[string]previewEntry
@@ -276,6 +277,8 @@ func (m *BrowseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.renderCache[msg.key] = previewEntry{content: msg.content, prefix: msg.prefix}
 		if msg.key == m.previewKey() {
 			m.previewVP.SetContent(msg.content)
+			m.previewVP.GotoTop()
+			m.previewContentSlug = m.previewSlug
 			m.imgWritten = queueImagePrefix(m.imgWriter, msg.prefix, m.imgWritten)
 		}
 		return m, nil
@@ -619,6 +622,8 @@ func (m *BrowseModel) refreshPreviewContent() tea.Cmd {
 	key := m.previewKey()
 	if e, ok := m.renderCache[key]; ok {
 		m.previewVP.SetContent(e.content)
+		m.previewVP.GotoTop()
+		m.previewContentSlug = m.previewSlug
 		m.imgWritten = queueImagePrefix(m.imgWriter, e.prefix, m.imgWritten)
 		return nil
 	}
