@@ -51,25 +51,21 @@ func clampLines(s string, width int) string {
 // mdImageRe matches a Markdown image: group 1 = alt text, group 2 = URL.
 var mdImageRe = regexp.MustCompile(`!\[([^\]]*)\]\(([^)\s]+)[^)]*\)`)
 
-// statementImages holds decoded statement images keyed by URL, plus the
-// terminal protocol to render them with.
+// statementImages holds decoded statement images keyed by URL, the terminal
+// protocol to render them with, and the Kitty transmit+placement prefix that
+// renderStatementMD produced for the current width (emitted once as a frame
+// prefix so it isn't clipped by a viewport).
 type statementImages struct {
-	proto termimg.Protocol
-	byURL map[string]*termimg.Image
+	proto  termimg.Protocol
+	byURL  map[string]*termimg.Image
+	prefix string
 }
 
-// transmitPrefix returns the Kitty transmit sequences for every image, to be
-// emitted once as a frame prefix (outside any viewport, so it isn't clipped).
-// Empty for the block protocol.
 func (si *statementImages) transmitPrefix() string {
-	if si == nil || si.proto != termimg.ProtoKitty {
+	if si == nil {
 		return ""
 	}
-	var b strings.Builder
-	for _, im := range si.byURL {
-		b.WriteString(im.Transmit())
-	}
-	return b.String()
+	return si.prefix
 }
 
 // imageURLs returns the distinct image URLs referenced in a markdown statement.
@@ -87,7 +83,9 @@ func imageURLs(md string) []string {
 
 // renderStatementMD renders a Markdown statement with glamour. When images are
 // available and the protocol supports them, each image reference is replaced by
-// an inline image block; otherwise it degrades to "⟨alt⟩" text.
+// an inline image block; otherwise it degrades to "⟨alt⟩" text. For the Kitty
+// protocol it also fills imgs.prefix with the transmit+placement escapes the
+// caller must emit as a frame prefix.
 func renderStatementMD(r *glamour.TermRenderer, md string, contentWidth int, imgs *statementImages) string {
 	render := func(s string) string {
 		if r == nil {
@@ -101,6 +99,9 @@ func renderStatementMD(r *glamour.TermRenderer, md string, contentWidth int, img
 	}
 
 	locs := mdImageRe.FindAllStringSubmatchIndex(md, -1)
+	if imgs != nil {
+		imgs.prefix = ""
+	}
 	if len(locs) == 0 {
 		return clampLines(render(md), contentWidth)
 	}
@@ -114,7 +115,7 @@ func renderStatementMD(r *glamour.TermRenderer, md string, contentWidth int, img
 		imgW = 8
 	}
 
-	var b strings.Builder
+	var b, prefix strings.Builder
 	last := 0
 	for _, m := range locs {
 		whole0, whole1 := m[0], m[1]
@@ -133,7 +134,8 @@ func renderStatementMD(r *glamour.TermRenderer, md string, contentWidth int, img
 		if im != nil {
 			var block string
 			if imgs.proto == termimg.ProtoKitty {
-				block, _ = im.Placeholders(imgW) // transmit is emitted as a frame prefix
+				block, _ = im.Placeholders(imgW)
+				prefix.WriteString(im.Transmit(imgW)) // emitted as a frame prefix, not clipped
 			} else {
 				block, _ = im.Render(imgs.proto, imgW)
 			}
@@ -151,6 +153,9 @@ func renderStatementMD(r *glamour.TermRenderer, md string, contentWidth int, img
 	}
 	if seg := md[last:]; strings.TrimSpace(seg) != "" {
 		b.WriteString(render(seg))
+	}
+	if imgs != nil {
+		imgs.prefix = prefix.String()
 	}
 	return b.String()
 }

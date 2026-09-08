@@ -136,7 +136,7 @@ func (im *Image) Render(proto Protocol, cols int) (body string, rows int) {
 	switch proto {
 	case ProtoKitty:
 		ph, _ := im.Placeholders(cols)
-		return im.Transmit() + ph, rows
+		return im.Transmit(cols) + ph, rows
 	case ProtoBlocks:
 		return im.blocks(cols, rows), rows
 	default:
@@ -144,14 +144,18 @@ func (im *Image) Render(proto Protocol, cols int) (body string, rows int) {
 	}
 }
 
-// Transmit is the Kitty "transmit only" escape sequence carrying the PNG
-// payload. It must be emitted once outside any viewport (e.g. as a frame
-// prefix), never clipped.
-func (im *Image) Transmit() string {
-	if im == nil {
+// Transmit is the Kitty escape sequence that uploads the PNG payload (a=t) and
+// creates the virtual placement (a=p, U=1) binding it to the placeholder grid
+// for the given column count. It must be emitted once outside any viewport
+// (e.g. as a frame prefix), never clipped.
+func (im *Image) Transmit(cols int) string {
+	if im == nil || cols < 1 {
 		return ""
 	}
-	return kittyTransmit(im.id, im.png)
+	if cols > 200 {
+		cols = 200
+	}
+	return kittyTransmit(im.id, im.png) + kittyVirtualPlacement(im.id, cols, im.rowsFor(cols))
 }
 
 // Placeholders returns just the Kitty Unicode-placeholder grid (no transmit)

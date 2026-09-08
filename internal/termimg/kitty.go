@@ -65,6 +65,14 @@ func kittyFG(id uint32) string {
 		itoa(int(id&0xFF)) + "m"
 }
 
+// kittyVirtualPlacement creates the virtual placement (a=p, U=1) that binds the
+// transmitted image to the Unicode placeholder cells. Without this the
+// placeholder characters render as nothing.
+func kittyVirtualPlacement(id uint32, cols, rows int) string {
+	return "\x1b_Ga=p,U=1,q=2,i=" + itoa(int(id)) +
+		",c=" + itoa(cols) + ",r=" + itoa(rows) + "\x1b\\"
+}
+
 // kittyTransmit builds the "transmit only" escape sequence (a=t) carrying the
 // PNG payload, chunked at 4096 base64 chars, with responses suppressed (q=2).
 func kittyTransmit(id uint32, png []byte) string {

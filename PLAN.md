@@ -401,11 +401,14 @@ done; submission history panel deferred. `internal/tui` + `cmd/lazyleet`.
 
 Append newest entries at the top. One entry per working session or milestone.
 
-- **2026-09-08 (h)** — Kitty image blank-gap fix. The transmit escape was being
-  clipped by `bubbles/viewport` (it truncates lines to its width). Split
-  `Image.Transmit()` / `Image.Placeholders()`; placeholders go in the viewport,
-  the transmit is a `View()` frame prefix (re-sent only when line 0 changes via
-  bubbletea's diff). `maxSide` 512→420. `-race` + staticcheck clean.
+- **2026-09-08 (h/i)** — Kitty image blank-gap: two bugs. (h) the transmit
+  escape was clipped by `bubbles/viewport` → split `Transmit()`/`Placeholders()`,
+  transmit is now a `View()` frame prefix. (i) **the Unicode-placeholder
+  protocol also needs a virtual-placement command** (`\x1b_Ga=p,U=1,i=<id>,
+  c=<cols>,r=<rows>`) after the transmit — without it the placeholder cells
+  render as nothing. Added it to `Image.Transmit(cols)`;
+  `renderStatementMD` now fills `statementImages.prefix` with
+  `transmit + a=p` for every image. `maxSide` 420. `-race` + staticcheck clean.
 - **2026-09-08 (g)** — Statement wrap bug + browse-preview images. glamour's
   dark style renders ~4 cells wider than its word-wrap (document margin + block
   indents), so preview lines overflowed the pane and the terminal clipped them
