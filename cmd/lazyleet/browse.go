@@ -8,6 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/sven97/lazyleet/internal/termimg"
 	"github.com/sven97/lazyleet/internal/tui"
 )
 
@@ -22,8 +23,10 @@ func runBrowse(app *appContext) error {
 	defer data.Close()
 
 	for {
+		bm := tui.NewBrowseModel(data)
+		bm.EnableImages(termimg.Detect(app.cfg.Images), app.paths.ImageCacheDir)
 		final, err := tea.NewProgram(
-			tui.NewBrowseModel(data),
+			bm,
 			tea.WithAltScreen(),
 			tea.WithMouseCellMotion(),
 		).Run()

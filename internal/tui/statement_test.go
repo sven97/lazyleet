@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/sven97/lazyleet/internal/termimg"
 )
 
@@ -36,6 +38,22 @@ func TestImageURLs(t *testing.T) {
 	}
 	if got[0] != "https://assets.leetcode.com/uploads/x.png" {
 		t.Errorf("first url = %q", got[0])
+	}
+}
+
+func TestRenderStatementFitsWidth(t *testing.T) {
+	md := "# Letter Combinations of a Phone Number\n\n" +
+		"Given a string containing digits from `2-9` inclusive, return all possible " +
+		"letter combinations that the number could represent. Return the answer in any order.\n\n" +
+		"A mapping of digits to letters (just like on the telephone buttons) is given below. " +
+		"Note that 1 does not map to any letters.\n\n" +
+		"- `1 <= digits.length <= 4`\n- `digits[i]` is a digit in the range `['2', '9']`.\n"
+	const width = 44
+	out := renderStatementMD(newStatementRenderer(width), md, width, nil)
+	for i, ln := range strings.Split(out, "\n") {
+		if w := ansi.StringWidth(ln); w > width {
+			t.Fatalf("line %d is %d cells wide (> %d): %q", i, w, width, ln)
+		}
 	}
 }
 

@@ -519,8 +519,7 @@ func (m *WorkspaceModel) refreshStatement() {
 		return
 	}
 	if m.stmtRenderer == nil || m.stmtWidth != w {
-		r, err := glamour.NewTermRenderer(glamour.WithAutoStyle(), glamour.WithWordWrap(w))
-		if err == nil {
+		if r := newStatementRenderer(w); r != nil {
 			m.stmtRenderer = r
 			m.stmtWidth = w
 		}

@@ -13,6 +13,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
 	"github.com/sahilm/fuzzy"
+
+	"github.com/sven97/lazyleet/internal/termimg"
 )
 
 const (
@@ -67,9 +69,13 @@ type BrowseModel struct {
 	previewVP      viewport.Model
 	previewErr     error
 	previewLoading bool
+	previewImages  *statementImages
 	stmtRenderer   *glamour.TermRenderer
 	stmtWidth      int
 	previewTab     int // 0 = statement, 1 = topics
+
+	imgProto termimg.Protocol
+	imgDir   string
 
 	spin      spinner.Model
 	syncing   bool
@@ -226,6 +232,7 @@ func (m *BrowseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.previewSlug = msg.slug
 			m.previewErr = nil
 			m.previewLoading = true
+			m.previewImages = nil
 			return m, m.loadStatement(msg.slug)
 		}
 		return m, nil
@@ -236,9 +243,18 @@ func (m *BrowseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.previewLoading = false
 		m.previewErr = msg.err
-		if msg.err == nil {
-			m.renderPreview(msg.md)
+		if msg.err != nil {
+			return m, nil
 		}
+		m.renderPreview(msg.md)
+		return m, m.loadPreviewImagesCmd(msg.slug, msg.md)
+
+	case previewImagesMsg:
+		if msg.slug != m.previewSlug || len(msg.byURL) == 0 {
+			return m, nil
+		}
+		m.previewImages = &statementImages{proto: m.imgProto, byURL: msg.byURL}
+		m.refreshPreviewContent()
 		return m, nil
 
 	case syncDoneMsg:
@@ -544,13 +560,19 @@ func (m *BrowseModel) relayout() {
 	m.clampCursor()
 }
 
+// EnableImages turns on inline preview images.
+func (m *BrowseModel) EnableImages(proto termimg.Protocol, cacheDir string) {
+	m.imgProto = proto
+	m.imgDir = cacheDir
+}
+
 func (m *BrowseModel) renderPreview(md string) {
 	w := m.previewVP.Width
 	if w < 1 {
 		w = 60
 	}
 	if m.stmtRenderer == nil || m.stmtWidth != w {
-		if r, err := glamour.NewTermRenderer(glamour.WithAutoStyle(), glamour.WithWordWrap(w)); err == nil {
+		if r := newStatementRenderer(w); r != nil {
 			m.stmtRenderer, m.stmtWidth = r, w
 		}
 	}
@@ -566,13 +588,40 @@ func (m *BrowseModel) refreshPreviewContent() {
 		m.previewVP.SetContent(m.topicsBody())
 		return
 	}
-	body := m.previewMD
-	if m.stmtRenderer != nil && body != "" {
-		if out, err := m.stmtRenderer.Render(body); err == nil {
-			body = out
-		}
-	}
+	body := renderStatementMD(m.stmtRenderer, m.previewMD, m.previewVP.Width, m.previewImages)
 	m.previewVP.SetContent(strings.TrimRight(body, "\n"))
+}
+
+type previewImagesMsg struct {
+	slug  string
+	byURL map[string]*termimg.Image
+}
+
+func (m *BrowseModel) loadPreviewImagesCmd(slug, md string) tea.Cmd {
+	if m.imgProto == termimg.ProtoNone {
+		return nil
+	}
+	urls := imageURLs(md)
+	if len(urls) == 0 {
+		return nil
+	}
+	dir := m.imgDir
+	return func() tea.Msg {
+		out := make(map[string]*termimg.Image, len(urls))
+		for _, u := range urls {
+			if !allowedImageHost(u) {
+				continue
+			}
+			data, err := termimg.Fetch(context.Background(), dir, u)
+			if err != nil {
+				continue
+			}
+			if im, err := termimg.Decode(data); err == nil {
+				out[u] = im
+			}
+		}
+		return previewImagesMsg{slug: slug, byURL: out}
+	}
 }
 
 func (m *BrowseModel) topicsBody() string {

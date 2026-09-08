@@ -10,7 +10,7 @@ local test running and one-key submit — in the user's own editor.
 > **Plan Changes**. Keep companion research in `lazygit-ui-research.md` and
 > `leetcode-product-analysis.md`.
 
-Last updated: 2026-09-08 (inline statement images: Kitty protocol + block fallback)
+Last updated: 2026-09-08 (statement wrap fix + inline images in browse preview)
 
 ---
 
@@ -253,8 +253,7 @@ run/submit are client-only (Phase 6 wires them). `internal/leetcode`.
       8 pure + 1 model test.
 - [x] Preview: statement Markdown via glamour, lazy-loaded on cursor change
       (120 ms debounce), cache→API. `]` toggles Statement / Topics tabs.
-      (Hints / Similar tabs not done. Inline images done in the **workspace**
-      statement pane, not yet in this preview pane.)
+      **Inline images** (Kitty / half-block). (Hints / Similar tabs not done.)
 - [x] Keymap + generated shortcut bar (`BrowseKeyMap`); `?` help overlay.
       (Config key overrides not wired yet — `config.Keys` still unused.)
 - [x] Async loading with a spinner; empty cache → "press s to sync" + inline
@@ -402,6 +401,16 @@ done; submission history panel deferred. `internal/tui` + `cmd/lazyleet`.
 
 Append newest entries at the top. One entry per working session or milestone.
 
+- **2026-09-08 (g)** — Statement wrap bug + browse-preview images. glamour's
+  dark style renders ~4 cells wider than its word-wrap (document margin + block
+  indents), so preview lines overflowed the pane and the terminal clipped them
+  (words vanished mid-sentence). Fix: `newStatementRenderer` wraps at
+  `width - 4` and `clampLines` ANSI-truncates any remaining overflow (skipping
+  Kitty-graphics lines). Both the workspace statement pane and the browse
+  preview pane now use `renderStatementMD`, so **inline images work in the
+  browse preview too** (`BrowseModel.EnableImages`, async `loadPreviewImagesCmd`,
+  cleared on selection change). New direct dep `charmbracelet/x/ansi`. +width
+  test. `-race` + staticcheck clean.
 - **2026-09-08 (f)** — Inline statement images. New `internal/termimg`: protocol
   detection (Kitty/Ghostty/WezTerm → Kitty graphics + Unicode placeholders;
   else truecolor half-block), fetch+disk-cache (`<data-dir>/imgcache`),

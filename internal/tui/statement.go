@@ -5,9 +5,47 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/glamour"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/sven97/lazyleet/internal/termimg"
 )
+
+// glamourMargin is how much wider than its word-wrap glamour's dark style can
+// render a line (document margin + block indents). We wrap that much narrower
+// and still clamp as a safety net.
+const glamourMargin = 4
+
+// newStatementRenderer builds a glamour renderer whose output fits within
+// contentWidth cells.
+func newStatementRenderer(contentWidth int) *glamour.TermRenderer {
+	w := contentWidth - glamourMargin
+	if w < 20 {
+		w = 20
+	}
+	r, err := glamour.NewTermRenderer(glamour.WithAutoStyle(), glamour.WithWordWrap(w))
+	if err != nil {
+		return nil
+	}
+	return r
+}
+
+// clampLines truncates each line to width cells (ANSI-aware), leaving lines that
+// carry a terminal-graphics escape (image blocks) untouched.
+func clampLines(s string, width int) string {
+	if width < 1 {
+		return s
+	}
+	lines := strings.Split(s, "\n")
+	for i, ln := range lines {
+		if strings.Contains(ln, "\x1b_G") { // Kitty graphics — never truncate
+			continue
+		}
+		if ansi.StringWidth(ln) > width {
+			lines[i] = ansi.Truncate(ln, width, "")
+		}
+	}
+	return strings.Join(lines, "\n")
+}
 
 // mdImageRe matches a Markdown image: group 1 = alt text, group 2 = URL.
 var mdImageRe = regexp.MustCompile(`!\[([^\]]*)\]\(([^)\s]+)[^)]*\)`)
@@ -44,12 +82,12 @@ func renderStatementMD(r *glamour.TermRenderer, md string, contentWidth int, img
 		if err != nil {
 			return s
 		}
-		return strings.TrimRight(out, "\n")
+		return clampLines(strings.TrimRight(out, "\n"), contentWidth)
 	}
 
 	locs := mdImageRe.FindAllStringSubmatchIndex(md, -1)
 	if len(locs) == 0 {
-		return render(md)
+		return clampLines(render(md), contentWidth)
 	}
 
 	inline := imgs != nil && imgs.proto != termimg.ProtoNone
