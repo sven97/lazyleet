@@ -396,13 +396,14 @@ done; submission history panel deferred. `internal/tui` + `cmd/lazyleet`.
 Append newest entries at the top. One entry per working session or milestone.
 
 - **2026-09-08 (c)** — `lazyleet auth login`: browser-driven auth via
-  `internal/browserlogin` (chromedp). Launches a visible Chromium window at the
-  login page, polls CDP `network.GetCookies` until both cookies appear, saves +
-  verifies. Persistent profile at `<data-dir>/browser`, `--fresh`,
-  `--browser-path`. `browserlogin` kept small/reusable for a future
-  Cloudflare-challenge fallback. chromedp/cdproto only added **~1.6 MB** to the
-  binary (32.6 MB) — dead-code elimination keeps the used surface tiny. 2 pure
-  tests (browser path can't run in CI). `-race` + staticcheck clean.
+  `internal/browserlogin`. v1 used chromedp's allocator to launch the browser →
+  Cloudflare hard-failed it (CDP fingerprint). v2: launch the browser as a
+  **plain subprocess** (debug port, `--remote-allow-origins=*`, no automation
+  flags), user passes CF normally, then attach `chromedp.NewRemoteAllocator`
+  only to poll `storage.GetCookies`. Persistent profile at `<data-dir>/browser`,
+  `--fresh`, `--browser-path`; browser binary auto-discovered per-OS. chromedp/
+  cdproto only added **~1.6 MB** (binary 32.6 MB). 2 pure tests (browser path
+  can't run in CI). `-race` + staticcheck clean.
 - **2026-09-08 (b)** — Auth: avoid the macOS keychain prompt. `Read` now
   iterates `TraverseCookieStores` and skips Chromium-family stores before
   opening them (no prompt) unless `--browser` names one; `importFromBrowser`
@@ -487,6 +488,15 @@ Append newest entries at the top. One entry per working session or milestone.
 Technical discoveries, gotchas, and things that changed our understanding.
 Append newest at the top; reference the phase/task.
 
+- **2026-09-08** (auth) — Cloudflare Turnstile **hard-fails** ("Verification
+  failed") any browser with a CDP client attached at launch — chromedp's
+  `NewExecAllocator`+`NewContext` sets `--enable-automation` / `navigator.
+  webdriver`. Fix: `browserlogin` launches the browser as a **plain
+  `os/exec` subprocess** with `--remote-debugging-port` + `--remote-allow-origins=*`
+  but no automation flags and no client; the user passes CF normally; lazyleet
+  connects via `chromedp.NewRemoteAllocator` only *after* login to read cookies
+  (`storage.GetCookies`, tab-independent). Needs a non-default `--user-data-dir`
+  (Chrome ≥128 requires it with the debug port anyway).
 - **2026-09-08** (auth) — `chromedp` + `cdproto` sound heavy (cdproto is huge
   generated code) but added only ~1.6 MB to the binary — the linker drops every
   unused CDP domain. So the "browser layer" is cheap to keep. Its browser-facing
