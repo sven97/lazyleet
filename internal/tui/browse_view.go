@@ -92,11 +92,17 @@ func (m *BrowseModel) sidebarBody(w int) string {
 }
 
 func (m *BrowseModel) listTitle() string {
+	var base string
 	if m.activeSrc > 0 && m.activeSrc < len(m.sources) && m.sources[m.activeSrc].kind == srcPlan {
 		solved, total := m.planProgress()
-		return fmt.Sprintf("%s  %d/%d solved", m.sources[m.activeSrc].label, solved, total)
+		base = fmt.Sprintf("%s  %d/%d solved", m.sources[m.activeSrc].label, solved, total)
+	} else {
+		base = fmt.Sprintf("Problems  (%d)", len(m.filtered))
 	}
-	return fmt.Sprintf("Problems  (%d)", len(m.filtered))
+	if s := m.filterSummary(); s != "" {
+		base += "  " + m.th.Muted.Render(s)
+	}
+	return base
 }
 
 func (m *BrowseModel) planProgress() (solved, total int) {
@@ -230,7 +236,12 @@ func (m *BrowseModel) renderHelp() string {
 		{"↑/k ↓/j", "move"}, {"g / G", "top / bottom"}, {"ctrl+u / ctrl+d", "page"},
 		{"tab / ⇧tab", "cycle panes"}, {"h / l", "prev / next pane"},
 		{"enter", "open workspace (or apply a source)"},
-		{"/", "fuzzy filter"}, {"esc", "clear filter / close help"},
+		{"/", "fuzzy filter"}, {"esc", "clear fuzzy filter / close help"},
+		{"d", "cycle difficulty filter (Easy → Medium → Hard → all)"},
+		{"f", "cycle status filter (unsolved → solved → attempted → all)"},
+		{"p", "toggle hide paid-only"},
+		{"S", "cycle sort (# → AC%↑ → AC%↓ → difficulty)"},
+		{"c", "clear all filters + sort"},
 		{"]", "toggle preview tab (statement / topics)"},
 		{"s", "sync problem cache from LeetCode"},
 		{"z", "zoom the focused pane"}, {"?", "toggle this help"}, {"q", "quit"},

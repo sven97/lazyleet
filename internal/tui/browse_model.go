@@ -53,6 +53,12 @@ type BrowseModel struct {
 	cursor   int
 	top      int
 
+	// structured list filter + sort (fuzzy filter is `filter` below)
+	fltDiff     string
+	fltStatus   string
+	fltHidePaid bool
+	sortMode    int
+
 	filtering bool
 	filter    textinput.Model
 
@@ -310,6 +316,25 @@ func (m *BrowseModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.previewTab = (m.previewTab + 1) % 2
 		m.refreshPreviewContent()
 		return m, nil
+
+	case key.Matches(msg, m.keys.FilterDiff):
+		m.fltDiff = cycleDifficulty(m.fltDiff)
+		return m.afterListChange()
+	case key.Matches(msg, m.keys.FilterStatus):
+		m.fltStatus = cycleStatus(m.fltStatus)
+		return m.afterListChange()
+	case key.Matches(msg, m.keys.FilterPaid):
+		m.fltHidePaid = !m.fltHidePaid
+		return m.afterListChange()
+	case key.Matches(msg, m.keys.Sort):
+		m.sortMode = (m.sortMode + 1) % sortModeCount
+		return m.afterListChange()
+	case key.Matches(msg, m.keys.ClearListFilter):
+		if !m.listFilterDirty() {
+			return m, nil
+		}
+		m.fltDiff, m.fltStatus, m.fltHidePaid, m.sortMode = "", "", false, sortByID
+		return m.afterListChange()
 	}
 
 	switch m.focus {
@@ -422,12 +447,21 @@ func (m *BrowseModel) rebuildView() {
 			}
 		}
 	}
+	m.view = applyListFilterSort(m.view, m.listFilterState(), m.sortMode)
+
 	m.haystack = make([]string, len(m.view))
 	for i, r := range m.view {
 		m.haystack[i] = fmt.Sprintf("%d %s", r.FrontendID, r.Title)
 	}
 	m.cursor, m.top = 0, 0
 	m.applyFilter()
+}
+
+// afterListChange rebuilds the view after a structured filter / sort change and
+// refreshes the preview for the new selection.
+func (m *BrowseModel) afterListChange() (tea.Model, tea.Cmd) {
+	m.rebuildView()
+	return m, m.debouncePreview()
 }
 
 func (m *BrowseModel) applyFilter() {

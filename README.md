@@ -26,9 +26,9 @@ Requires Go 1.27+. The SQLite driver is pure Go, so no C toolchain is needed.
 
 ```sh
 lazyleet sync                 # cache the full problem list + study plans locally
-lazyleet                      # browse mode: sidebar · fuzzy list · preview
-                              #   / filter · tab panes · enter opens workspace
-                              #   s sync · z zoom · ? help · q quit
+lazyleet                      # browse mode: sidebar · list · preview
+                              #   / fuzzy filter · d/f/p filter · S sort · c clear
+                              #   tab panes · enter opens workspace · s sync · ? help
 
 lazyleet solve two-sum        # jump straight into the workspace for one problem
 lazyleet solve valid-parentheses --lang python3

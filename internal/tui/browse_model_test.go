@@ -144,6 +144,48 @@ func TestBrowseSelectPlanReordersAndCounts(t *testing.T) {
 	}
 }
 
+func TestBrowseStructuredFilterAndSort(t *testing.T) {
+	m, _ := bootBrowse(t)
+	// fixture rows: two-sum(Easy,ac), valid-parentheses(Easy), trapping-rain-water(Hard)
+	if len(m.view) != 3 {
+		t.Fatalf("start with %d rows", len(m.view))
+	}
+
+	// d -> Easy
+	step(&m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	if m.fltDiff != "Easy" || len(m.view) != 2 {
+		t.Fatalf("after d: diff=%q rows=%d", m.fltDiff, len(m.view))
+	}
+	// d d -> Medium, Hard  (cycle to Hard)
+	step(&m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	step(&m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	if m.fltDiff != "Hard" || len(m.view) != 1 || m.view[0].Slug != "trapping-rain-water" {
+		t.Fatalf("after d×3: diff=%q view=%v", m.fltDiff, m.view)
+	}
+	// c -> clear
+	step(&m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	if m.listFilterDirty() || len(m.view) != 3 {
+		t.Fatalf("after c: dirty=%v rows=%d", m.listFilterDirty(), len(m.view))
+	}
+
+	// f -> unsolved
+	step(&m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
+	if m.fltStatus != "unsolved" {
+		t.Fatalf("after f: status=%q", m.fltStatus)
+	}
+	for _, r := range m.view {
+		if r.Status == "ac" {
+			t.Fatalf("solved row %s leaked into unsolved filter", r.Slug)
+		}
+	}
+
+	// S -> cycle sort off default
+	step(&m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'S'}})
+	if m.sortMode == sortByID {
+		t.Fatal("S should advance the sort mode")
+	}
+}
+
 func TestBrowseSyncFlow(t *testing.T) {
 	f := newFakeData()
 	f.rows = nil

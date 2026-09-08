@@ -10,7 +10,7 @@ local test running and one-key submit — in the user's own editor.
 > **Plan Changes**. Keep companion research in `lazygit-ui-research.md` and
 > `leetcode-product-analysis.md`.
 
-Last updated: 2026-09-08 (auth: browser sign-in is the default; command tree tidied)
+Last updated: 2026-09-08 (browse filter/sort chips + workspace unrun marker)
 
 ---
 
@@ -244,8 +244,13 @@ run/submit are client-only (Phase 6 wires them). `internal/leetcode`.
       title shows `N/M solved`. Official plans fetched via `studyPlanV2Detail`
       and cached; bundled from `internal/plans`.
 - [x] Fuzzy find: `/` opens a `textinput`; `sahilm/fuzzy` over `"id title"`;
-      `esc` clears. (Difficulty/status/tag filter *chips* not done — the store
-      supports the filters, no UI yet.)
+      `esc` clears.
+- [x] Structured filter + sort (in-memory over `allRows`, `internal/tui/
+      browse_filter.go`): `d` cycles difficulty, `f` cycles status
+      (unsolved/solved/attempted), `p` toggles hide-paid, `S` cycles sort
+      (# / AC%↑ / AC%↓ / difficulty), `c` clears. Active filters shown as chips
+      in the list title. Composes with the source (plan) and the fuzzy filter.
+      8 pure + 1 model test.
 - [x] Preview: statement Markdown via glamour, lazy-loaded on cursor change
       (120 ms debounce), cache→API. `]` toggles Statement / Topics tabs.
       (Hints / Similar tabs not done — need those fields fetched.)
@@ -258,7 +263,7 @@ run/submit are client-only (Phase 6 wires them). `internal/leetcode`.
       (`synccore.go`).
 - [x] Tests: fake `BrowseData`, 6 model tests (render / cursor+open / fuzzy /
       plan reorder+counts / empty-cache sync). `-race` + staticcheck clean.
-- [ ] Column sort, filter chips, Hints/Similar preview tabs, config-driven keys.
+- [ ] Hints/Similar preview tabs, config-driven keys (`config.Keys` still unused).
 - [ ] **Needs manual check in a real terminal** (pty capture unavailable in this
       env) — same as Tier C.
 
@@ -300,7 +305,11 @@ driven by `leetcode.Fixture` instead of the API. `internal/workspace`.
       `exp`/`got` diff on failure, stderr + captured stdout.
 - [x] Generated shortcut bar from the keymap (`KeyMap.shortcutHints`).
 - [ ] Panels/tabs for Tests · Notes (only Statement/Code/Results so far).
-- [ ] `dirty` indicator; return to **browse mode** on `b` (currently quits).
+- [x] "unrun" indicator: the Code pane title shows `● unrun` when the mirrored
+      solution differs from what the last local run executed.
+- [ ] return to **browse mode** on `b` (browse loop already handles it via
+      `Chosen`; workspace `b` still calls `tea.Quit` which the loop treats as
+      "back" — fine in practice).
 - [ ] Test-case manager UI (edit `testcases.jsonl` by hand for now).
 - [ ] Tier B: detect tmux/zellij/wezterm/kitty; spawn `$EDITOR` in an adjacent
       pane; manage layout via multiplexer CLI.
@@ -392,6 +401,12 @@ done; submission history panel deferred. `internal/tui` + `cmd/lazyleet`.
 
 Append newest entries at the top. One entry per working session or milestone.
 
+- **2026-09-08 (e)** — Daily-use polish (Phase 2/4 leftovers). Browse:
+  structured filter (`d` difficulty / `f` status / `p` hide-paid) + sort (`S`:
+  # / AC%↑ / AC%↓ / difficulty) + `c` clear, in-memory over `allRows`
+  (`browse_filter.go`), active state shown as chips in the list title; composes
+  with plan source + fuzzy. Workspace: Code pane shows `● unrun` when the mirror
+  differs from the last local run. ~10 new tests. `-race` + staticcheck clean.
 - **2026-09-08 (d)** — Auth cleanup. **Browser sign-in confirmed working** by
   the user (v2 plain-subprocess approach passes Cloudflare). Command tree
   reshaped: bare `lazyleet auth` = browser sign-in (was cookie scrape);

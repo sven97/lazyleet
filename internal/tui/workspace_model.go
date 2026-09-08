@@ -47,6 +47,7 @@ type WorkspaceModel struct {
 	stmtRenderer *glamour.TermRenderer
 	stmtWidth    int
 	codeSrc      string
+	ranSrc       string // codeSrc as of the last local run started
 
 	runner    runner.Runner
 	runnerErr error // why there is no local runner for this language, if so
@@ -173,6 +174,7 @@ func (m *WorkspaceModel) startRun() (tea.Model, tea.Cmd) {
 	m.running = true
 	m.lastErr = nil
 	m.showRemote = false
+	m.ranSrc = m.codeSrc
 	m.statusMsg = ""
 	m.refreshResults()
 	return m, tea.Batch(m.runCmd(), m.spin.Tick)
@@ -486,6 +488,12 @@ func (m *WorkspaceModel) refreshResults() {
 	m.results.SetContent(body)
 }
 
+// codeChangedSinceRun reports whether the mirrored solution differs from what
+// the last local run executed. False before any run.
+func (m *WorkspaceModel) codeChangedSinceRun() bool {
+	return m.ranSrc != "" && m.codeSrc != m.ranSrc
+}
+
 func (m *WorkspaceModel) reloadCode() {
 	src, err := m.ws.ReadSolution()
 	if err != nil {
@@ -563,7 +571,11 @@ func (m *WorkspaceModel) paneTitle(p Pane, focused bool) string {
 		return ts.Render(fmt.Sprintf("%s  ", m.q.Title)) +
 			DifficultyStyle(m.q.Difficulty).Render(m.q.Difficulty)
 	case PaneCode:
-		return ts.Render(fmt.Sprintf("solution.%s", extOf(m.ws.SolutionPath)))
+		title := ts.Render(fmt.Sprintf("solution.%s", extOf(m.ws.SolutionPath)))
+		if m.codeChangedSinceRun() {
+			title += m.th.ErrorText.Render(" ● unrun")
+		}
+		return title
 	case PaneResults:
 		return ts.Render("Results")
 	}
