@@ -10,7 +10,7 @@ local test running and one-key submit — in the user's own editor.
 > **Plan Changes**. Keep companion research in `lazygit-ui-research.md` and
 > `leetcode-product-analysis.md`.
 
-Last updated: 2026-09-08 (auth = browser cookie auto-import)
+Last updated: 2026-09-08 (auth = browser-driven login via chromedp)
 
 ---
 
@@ -40,7 +40,7 @@ make that loop frictionless.
 | D1 | Tool language | Go (1.23+) | Assumed | Matches lazygit ecosystem; single static binary. |
 | D2 | TUI toolkit | Bubble Tea + Lip Gloss + Bubbles (+ glamour for the statement, chroma for the code mirror) | **Decided 2026-09-07** | Chosen because Tier C/B need no embedded terminal and Bubble Tea has the ecosystem. Tier A (embedded editor pane) will need `charmbracelet/x/vt` + `creack/pty`; revisit only then. |
 | D3 | LeetCode access | Unofficial GraphQL (`leetcode.com/graphql`) + REST run/submit | Assumed | No official API exists. Isolate entirely behind `internal/leetcode`. |
-| D4 | Auth | **Browser cookie auto-import** (`lazyleet auth` reads `LEETCODE_SESSION` + `csrftoken` from Chrome/Firefox/Safari/Edge/Brave/Arc/… via `browserutils/kooky`); `--manual` / `--stdin` fallbacks | **Changed 2026-09-08** | Was manual paste. Stored 0600 in `auth.json`. macOS Chrome import triggers a Keychain prompt. |
+| D4 | Auth | `lazyleet auth login` (chromedp drives a visible browser, reads the session over CDP — no keychain) is the recommended path; `lazyleet auth` (kooky cookie scrape, keychain-free browsers first) and `--manual` / `--stdin` remain. | **Changed 2026-09-08 (×2)** | Was manual paste → cookie scrape → browser-driven. Stored 0600 in `auth.json`. `browserlogin` is a reusable browser layer for later (Cloudflare fallback, editorial scraping). |
 | D5 | First judged language | Python, then JS/TS, then compiled langs | Assumed | Python driver is the reference implementation. |
 | D6 | Local store | SQLite via `modernc.org/sqlite` (pure Go) | Assumed | Problem cache, detail cache, submission history, workspace state. |
 | D7 | Dirs | XDG: config `~/.config/lazyleet/`, state/cache `~/.local/share/lazyleet/` | Assumed | |
@@ -182,13 +182,20 @@ run/submit are client-only (Phase 6 wires them). `internal/leetcode`.
 - [x] GraphQL client (`client.go`): `X-Csrftoken` + `Referer` + `Origin` +
       `Cookie` headers, `rate.Limiter` (2 req/s), retry on 429/5xx with linear
       backoff, `APIError` type, per-region base URLs, functional options.
-- [x] `lazyleet auth` — **browser cookie auto-import** (`internal/browsercookies`
-      over `browserutils/kooky`): reads `LEETCODE_SESSION` + `csrftoken` from any
-      logged-in browser, `Pick` chooses one browser+profile (prefers complete +
-      unexpired), verifies via `userStatus`, saves to `auth.json` (0600,
-      temp-file swap). `--browser <name>` restricts it; `auth browsers` lists
-      detected stores; `--manual` / `--stdin` are the paste fallbacks.
-      `auth status` / `auth logout` unchanged.
+- [x] `lazyleet auth login` — **browser-driven** (`internal/browserlogin` over
+      `chromedp`): opens a visible Chromium window at the LeetCode login page,
+      polls `network.GetCookies` over CDP until `LEETCODE_SESSION` + `csrftoken`
+      appear, verifies via `userStatus`, saves. Dedicated profile at
+      `<data-dir>/browser` (`--fresh` wipes it), `--browser-path` overrides
+      discovery. No OS keychain prompt, no cookie-file decryption. `browserlogin`
+      is intentionally a small reusable browser layer.
+- [x] `lazyleet auth` — **cookie scrape** (`internal/browsercookies` over
+      `browserutils/kooky`): reads the two cookies from an already-logged-in
+      browser, keychain-free ones (Firefox/Safari) first, `Pick` chooses one
+      browser+profile. `--browser <name>` restricts it (and allows keychain);
+      `auth browsers` lists detected stores (marks "· needs keychain");
+      `--manual` / `--stdin` are the paste fallbacks. `auth status` /
+      `auth logout` unchanged.
 - [x] Problem list (`problemsetQuestionList`), paginated
       (`ListProblems` / `ListAllProblems` with progress cb): frontend id, slug,
       title, difficulty, acRate, paidOnly, status, topic tags. `questionId` is
@@ -388,6 +395,14 @@ done; submission history panel deferred. `internal/tui` + `cmd/lazyleet`.
 
 Append newest entries at the top. One entry per working session or milestone.
 
+- **2026-09-08 (c)** — `lazyleet auth login`: browser-driven auth via
+  `internal/browserlogin` (chromedp). Launches a visible Chromium window at the
+  login page, polls CDP `network.GetCookies` until both cookies appear, saves +
+  verifies. Persistent profile at `<data-dir>/browser`, `--fresh`,
+  `--browser-path`. `browserlogin` kept small/reusable for a future
+  Cloudflare-challenge fallback. chromedp/cdproto only added **~1.6 MB** to the
+  binary (32.6 MB) — dead-code elimination keeps the used surface tiny. 2 pure
+  tests (browser path can't run in CI). `-race` + staticcheck clean.
 - **2026-09-08 (b)** — Auth: avoid the macOS keychain prompt. `Read` now
   iterates `TraverseCookieStores` and skips Chromium-family stores before
   opening them (no prompt) unless `--browser` names one; `importFromBrowser`
@@ -472,6 +487,11 @@ Append newest entries at the top. One entry per working session or milestone.
 Technical discoveries, gotchas, and things that changed our understanding.
 Append newest at the top; reference the phase/task.
 
+- **2026-09-08** (auth) — `chromedp` + `cdproto` sound heavy (cdproto is huge
+  generated code) but added only ~1.6 MB to the binary — the linker drops every
+  unused CDP domain. So the "browser layer" is cheap to keep. Its browser-facing
+  code can't be exercised in CI (no Chrome); test the pure helpers, drive the
+  rest manually.
 - **2026-09-08** (auth) — the macOS "Chrome Safe Storage" keychain prompt fires
   whenever kooky opens a Chromium-family store, and the "Always Allow" grant is
   bound to the exact (unsigned) binary — so every `make build` / `go run`

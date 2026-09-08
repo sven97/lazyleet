@@ -34,12 +34,14 @@ lazyleet solve two-sum        # jump straight into the workspace for one problem
 lazyleet solve valid-parentheses --lang python3
 lazyleet solve two-sum --refresh   # bypass the local cache
 
-lazyleet auth                 # import your LeetCode session from a browser
-                              #   (only needed for R run / s submit)
-lazyleet auth --browser arc   # …from a specific browser
-lazyleet auth browsers        # list detected browser cookie stores
-lazyleet auth --manual        # paste LEETCODE_SESSION + csrftoken yourself
+lazyleet auth login           # open a browser window, log in; lazyleet reads
+                              #   the session over DevTools (no keychain prompt)
+lazyleet auth                 # or: read cookies from an already-logged-in browser
+lazyleet auth --browser arc   #   …from a specific one
+lazyleet auth browsers        #   list detected browser cookie stores
+lazyleet auth --manual        #   paste LEETCODE_SESSION + csrftoken yourself
 lazyleet auth status | logout
+# auth is only needed for `R` run / `s` submit on LeetCode
 
 lazyleet debug list [--remote]     # cached (or live) problem list
 lazyleet debug problem <slug>      # fetch + print one problem's detail

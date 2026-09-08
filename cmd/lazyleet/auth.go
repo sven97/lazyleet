@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/sven97/lazyleet/internal/browsercookies"
+	"github.com/sven97/lazyleet/internal/browserlogin"
 	"github.com/sven97/lazyleet/internal/config"
 	"github.com/sven97/lazyleet/internal/leetcode"
 )
@@ -31,8 +33,11 @@ func newAuthCmd(app *appContext) *cobra.Command {
 			"Firefox, Safari, Edge, Brave, Arc, Vivaldi, Opera, …). Nothing is sent\n" +
 			"anywhere — the two values are written to auth.json (0600) on this\n" +
 			"machine. `lazyleet auth logout` removes them.\n\n" +
-			"Use --browser to pick one browser, `lazyleet auth browsers` to see what\n" +
-			"was detected, or --manual to paste the cookies yourself.",
+			"  lazyleet auth            read cookies from an already-logged-in browser\n" +
+			"  lazyleet auth login      open a browser window to log in (no keychain prompt)\n" +
+			"  lazyleet auth --browser  restrict the read to one browser\n" +
+			"  lazyleet auth browsers   list detected browser cookie stores\n" +
+			"  lazyleet auth --manual   paste the two cookies yourself",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			var creds leetcode.Credentials
 			var source string
@@ -71,6 +76,63 @@ func newAuthCmd(app *appContext) *cobra.Command {
 	cmd.Flags().StringVar(&browser, "browser", "", "restrict the import to one browser (chrome, firefox, safari, edge, brave, arc, …)")
 	cmd.Flags().BoolVar(&manual, "manual", false, "paste LEETCODE_SESSION and csrftoken yourself instead of reading a browser")
 	cmd.Flags().BoolVar(&fromStdin, "stdin", false, "read LEETCODE_SESSION on line 1 and csrftoken on line 2 from stdin")
+
+	var browserPath string
+	var fresh bool
+	loginCmd := &cobra.Command{
+		Use:   "login",
+		Short: "Log in via a browser window lazyleet controls (no keychain prompt)",
+		Long: "Opens a visible Chrome/Chromium/Edge/Brave window at the LeetCode login\n" +
+			"page. Log in there (Cloudflare/captcha included) and lazyleet reads the\n" +
+			"session straight from the running browser over the DevTools protocol —\n" +
+			"nothing to decrypt, no OS keychain prompt.\n\n" +
+			"Uses a dedicated profile at <data-dir>/browser so later logins are quick.",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			host := siteHost(app)
+			profile := filepath.Join(app.paths.DataDir, "browser")
+			if fresh {
+				_ = os.RemoveAll(profile)
+			}
+			if err := app.paths.EnsureDirs(); err != nil {
+				return err
+			}
+
+			ctx, cancel := context.WithTimeout(cmd.Context(), 6*time.Minute)
+			defer cancel()
+
+			fmt.Fprintln(cmd.ErrOrStderr(), "opening a browser… log in to LeetCode, then come back here.")
+			vals, err := browserlogin.Capture(ctx, browserlogin.Options{
+				LoginURL:     "https://" + host + "/accounts/login/",
+				CookieDomain: host,
+				WaitFor:      []string{"LEETCODE_SESSION", "csrftoken"},
+				ProfileDir:   profile,
+				ExecPath:     browserPath,
+				OnStatus:     func(s string) { fmt.Fprintln(cmd.ErrOrStderr(), s) },
+			})
+			if err != nil {
+				return err
+			}
+
+			creds := leetcode.Credentials{
+				Session:   vals["LEETCODE_SESSION"],
+				CSRFToken: vals["csrftoken"],
+				Region:    string(app.cfg.Region),
+			}
+			if err := creds.Save(app.paths.AuthFile); err != nil {
+				return err
+			}
+			user, verr := verifyAuth(cmd.Context(), app)
+			if verr != nil {
+				fmt.Fprintf(cmd.ErrOrStderr(), "saved cookies but LeetCode did not accept them: %v\n", verr)
+				return nil
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "authenticated as %s (via browser login)\n", user)
+			return nil
+		},
+	}
+	loginCmd.Flags().StringVar(&browserPath, "browser-path", "", "path to a Chromium-family browser binary (default: auto-discover)")
+	loginCmd.Flags().BoolVar(&fresh, "fresh", false, "wipe the lazyleet browser profile and start a clean login")
+	cmd.AddCommand(loginCmd)
 
 	cmd.AddCommand(&cobra.Command{
 		Use:   "browsers",
