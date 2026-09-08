@@ -10,7 +10,7 @@ local test running and one-key submit — in the user's own editor.
 > **Plan Changes**. Keep companion research in `lazygit-ui-research.md` and
 > `leetcode-product-analysis.md`.
 
-Last updated: 2026-09-07 (Phase 6 run/submit wired into the workspace)
+Last updated: 2026-09-08 (auth = browser cookie auto-import)
 
 ---
 
@@ -40,7 +40,7 @@ make that loop frictionless.
 | D1 | Tool language | Go (1.23+) | Assumed | Matches lazygit ecosystem; single static binary. |
 | D2 | TUI toolkit | Bubble Tea + Lip Gloss + Bubbles (+ glamour for the statement, chroma for the code mirror) | **Decided 2026-09-07** | Chosen because Tier C/B need no embedded terminal and Bubble Tea has the ecosystem. Tier A (embedded editor pane) will need `charmbracelet/x/vt` + `creack/pty`; revisit only then. |
 | D3 | LeetCode access | Unofficial GraphQL (`leetcode.com/graphql`) + REST run/submit | Assumed | No official API exists. Isolate entirely behind `internal/leetcode`. |
-| D4 | Auth | MVP: user pastes `LEETCODE_SESSION` + `csrftoken`; later browser-cookie extraction / login flow | Assumed | Store 0600 or OS keychain. |
+| D4 | Auth | **Browser cookie auto-import** (`lazyleet auth` reads `LEETCODE_SESSION` + `csrftoken` from Chrome/Firefox/Safari/Edge/Brave/Arc/… via `browserutils/kooky`); `--manual` / `--stdin` fallbacks | **Changed 2026-09-08** | Was manual paste. Stored 0600 in `auth.json`. macOS Chrome import triggers a Keychain prompt. |
 | D5 | First judged language | Python, then JS/TS, then compiled langs | Assumed | Python driver is the reference implementation. |
 | D6 | Local store | SQLite via `modernc.org/sqlite` (pure Go) | Assumed | Problem cache, detail cache, submission history, workspace state. |
 | D7 | Dirs | XDG: config `~/.config/lazyleet/`, state/cache `~/.local/share/lazyleet/` | Assumed | |
@@ -182,9 +182,13 @@ run/submit are client-only (Phase 6 wires them). `internal/leetcode`.
 - [x] GraphQL client (`client.go`): `X-Csrftoken` + `Referer` + `Origin` +
       `Cookie` headers, `rate.Limiter` (2 req/s), retry on 429/5xx with linear
       backoff, `APIError` type, per-region base URLs, functional options.
-- [x] `lazyleet auth` — hidden stdin prompt (or `--stdin`) for
-      `LEETCODE_SESSION` + `csrftoken`, saved to `auth.json` (0600, temp-file
-      swap). `auth status` verifies via `userStatus`; `auth logout` deletes.
+- [x] `lazyleet auth` — **browser cookie auto-import** (`internal/browsercookies`
+      over `browserutils/kooky`): reads `LEETCODE_SESSION` + `csrftoken` from any
+      logged-in browser, `Pick` chooses one browser+profile (prefers complete +
+      unexpired), verifies via `userStatus`, saves to `auth.json` (0600,
+      temp-file swap). `--browser <name>` restricts it; `auth browsers` lists
+      detected stores; `--manual` / `--stdin` are the paste fallbacks.
+      `auth status` / `auth logout` unchanged.
 - [x] Problem list (`problemsetQuestionList`), paginated
       (`ListProblems` / `ListAllProblems` with progress cb): frontend id, slug,
       title, difficulty, acRate, paidOnly, status, topic tags. `questionId` is
@@ -384,6 +388,13 @@ done; submission history panel deferred. `internal/tui` + `cmd/lazyleet`.
 
 Append newest entries at the top. One entry per working session or milestone.
 
+- **2026-09-08 (a)** — Auth reworked to browser cookie auto-import
+  (`lazyleet auth` with no flags). New `internal/browsercookies` wraps
+  `browserutils/kooky` (`Read` + pure `Pick` group-by-browser chooser, 5 tests);
+  `cmd/lazyleet/auth.go` adds `--browser`, `auth browsers`, keeps
+  `--manual`/`--stdin`. `auth browsers` on this Mac sees chrome + safari + opera.
+  Happy path (real cookies + macOS Keychain prompt) is untested in-sandbox —
+  needs the user. `-race` + staticcheck clean. Not yet committed.
 - **2026-09-07 (g)** — Phase 6 run/submit. `tui.RemoteJudge` interface +
   `RemoteOutcome` keep `internal/tui` transport-free; `cmd/lazyleet/
   remotejudge.go` implements it over the LeetCode client (Interpret/Submit →
@@ -457,6 +468,12 @@ Append newest entries at the top. One entry per working session or milestone.
 Technical discoveries, gotchas, and things that changed our understanding.
 Append newest at the top; reference the phase/task.
 
+- **2026-09-08** (auth) — `browserutils/kooky` (the maintained fork of
+  `zellyn/kooky`; `zellyn/kooky` fails `go get` — module path mismatch) adds
+  ~10 indirect deps (its own pure-Go sqlite3/ese readers, keychain libs, lz4)
+  and roughly doubles the binary to ~31 MB. Still `CGO_ENABLED=0`; goreleaser
+  snapshot fine. Iterate cookies with `kooky.TraverseCookies` (range-over-func)
+  so one unreadable store doesn't fail the whole scan.
 - **2026-09-07** (Phase 6) — `interpret_solution` ("Run Code") returns
   `correct_answer` / `run_success`, not a `status_msg` like submit does. The
   outcome mapper special-cases `kind == "run"`: compile err → runtime err →
