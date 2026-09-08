@@ -10,7 +10,7 @@ local test running and one-key submit — in the user's own editor.
 > **Plan Changes**. Keep companion research in `lazygit-ui-research.md` and
 > `leetcode-product-analysis.md`.
 
-Last updated: 2026-09-08 (browse filter/sort chips + workspace unrun marker)
+Last updated: 2026-09-08 (inline statement images: Kitty protocol + block fallback)
 
 ---
 
@@ -253,7 +253,8 @@ run/submit are client-only (Phase 6 wires them). `internal/leetcode`.
       8 pure + 1 model test.
 - [x] Preview: statement Markdown via glamour, lazy-loaded on cursor change
       (120 ms debounce), cache→API. `]` toggles Statement / Topics tabs.
-      (Hints / Similar tabs not done — need those fields fetched.)
+      (Hints / Similar tabs not done. Inline images done in the **workspace**
+      statement pane, not yet in this preview pane.)
 - [x] Keymap + generated shortcut bar (`BrowseKeyMap`); `?` help overlay.
       (Config key overrides not wired yet — `config.Keys` still unused.)
 - [x] Async loading with a spinner; empty cache → "press s to sync" + inline
@@ -401,6 +402,19 @@ done; submission history panel deferred. `internal/tui` + `cmd/lazyleet`.
 
 Append newest entries at the top. One entry per working session or milestone.
 
+- **2026-09-08 (f)** — Inline statement images. New `internal/termimg`: protocol
+  detection (Kitty/Ghostty/WezTerm → Kitty graphics + Unicode placeholders;
+  else truecolor half-block), fetch+disk-cache (`<data-dir>/imgcache`),
+  decode+downscale (`x/image`, ≤512px), Kitty transmit (chunked, `q=2` silent)
+  + placeholder grid, block encoder. `internal/tui/statement.go`:
+  `renderStatementMD` splits the markdown at image refs, glamour-renders the
+  text segments, splices the image block between; falls back to `⟨alt⟩` while
+  loading / unsupported. Workspace `EnableImages` + async `loadImagesCmd`
+  (host-allowlisted to leetcode asset domains). `config.images`
+  (auto/off/blocks/kitty), `LAZYLEET_IMG` env override, `lazyleet debug img
+  <url> --cols`. Verified structure against a real LeetCode tree PNG (kitty:
+  valid transmit + 950 placeholders for 50×19; blocks: 19 lines). Visual check
+  on Ghostty is the user's. `-race` + staticcheck clean.
 - **2026-09-08 (e)** — Daily-use polish (Phase 2/4 leftovers). Browse:
   structured filter (`d` difficulty / `f` status / `p` hide-paid) + sort (`S`:
   # / AC%↑ / AC%↓ / difficulty) + `c` clear, in-memory over `allRows`
@@ -508,6 +522,14 @@ Append newest entries at the top. One entry per working session or milestone.
 Technical discoveries, gotchas, and things that changed our understanding.
 Append newest at the top; reference the phase/task.
 
+- **2026-09-08** (images) — inline images in a Bubble Tea viewport: only Kitty
+  **Unicode placeholders** keep the renderer's row accounting correct (iTerm2 /
+  Kitty direct placement move the cursor in ways bubbletea doesn't track →
+  clobbered on redraw). The transmit sequence rides on line 0 of the image block
+  inside the scrollable content, so it re-sends every render while visible;
+  `q=2` silences it and ~20–30 KB is fine for input-driven redraws. If
+  held-scroll stutters, split transmit from placeholders and send it once as a
+  `View()` prefix.
 - **2026-09-08** (auth) — Cloudflare Turnstile **hard-fails** ("Verification
   failed") any browser with a CDP client attached at launch — chromedp's
   `NewExecAllocator`+`NewContext` sets `--enable-automation` / `navigator.

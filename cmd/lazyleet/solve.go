@@ -12,6 +12,7 @@ import (
 
 	"github.com/sven97/lazyleet/internal/leetcode"
 	"github.com/sven97/lazyleet/internal/store"
+	"github.com/sven97/lazyleet/internal/termimg"
 	"github.com/sven97/lazyleet/internal/testcase"
 	"github.com/sven97/lazyleet/internal/tui"
 	"github.com/sven97/lazyleet/internal/workspace"
@@ -79,6 +80,8 @@ func (a *appContext) openWorkspace(ctx context.Context, slug, lang string, refre
 	if err != nil {
 		return err
 	}
+	m.EnableImages(termimg.Detect(a.cfg.Images), a.paths.ImageCacheDir)
+
 	_, err = tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion()).Run()
 	return err
 }

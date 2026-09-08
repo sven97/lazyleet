@@ -15,6 +15,7 @@ require (
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/sahilm/fuzzy v0.1.3
 	github.com/spf13/cobra v1.10.2
+	golang.org/x/image v0.46.0
 	golang.org/x/term v0.45.0
 	golang.org/x/time v0.15.0
 	gopkg.in/yaml.v3 v3.0.1
@@ -70,8 +71,8 @@ require (
 	github.com/zalando/go-keyring v0.2.7 // indirect
 	golang.org/x/crypto v0.51.0 // indirect
 	golang.org/x/net v0.55.0 // indirect
-	golang.org/x/sys v0.47.0 // indirect
-	golang.org/x/text v0.37.0 // indirect
+	golang.org/x/sys v0.48.0 // indirect
+	golang.org/x/text v0.42.0 // indirect
 	gopkg.in/ini.v1 v1.67.1 // indirect
 	modernc.org/libc v1.75.6 // indirect
 	modernc.org/mathutil v1.7.1 // indirect

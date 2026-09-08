@@ -17,6 +17,7 @@ import (
 
 	"github.com/sven97/lazyleet/internal/leetcode"
 	"github.com/sven97/lazyleet/internal/runner"
+	"github.com/sven97/lazyleet/internal/termimg"
 	"github.com/sven97/lazyleet/internal/testcase"
 	"github.com/sven97/lazyleet/internal/workspace"
 )
@@ -46,6 +47,9 @@ type WorkspaceModel struct {
 
 	stmtRenderer *glamour.TermRenderer
 	stmtWidth    int
+	stmtImages   *statementImages
+	imgProto     termimg.Protocol
+	imgDir       string
 	codeSrc      string
 	ranSrc       string // codeSrc as of the last local run started
 
@@ -127,9 +131,64 @@ func NewWorkspaceModel(ws *workspace.Workspace, q leetcode.Question, editor stri
 	return m, nil
 }
 
+// EnableImages turns on inline statement images using the given protocol and
+// on-disk cache directory. Call before running the program.
+func (m *WorkspaceModel) EnableImages(proto termimg.Protocol, cacheDir string) {
+	m.imgProto = proto
+	m.imgDir = cacheDir
+}
+
 // Init implements tea.Model.
 func (m *WorkspaceModel) Init() tea.Cmd {
-	return tea.Batch(m.spin.Tick, m.waitForFileChange())
+	cmds := []tea.Cmd{m.spin.Tick, m.waitForFileChange()}
+	if c := m.loadImagesCmd(); c != nil {
+		cmds = append(cmds, c)
+	}
+	return tea.Batch(cmds...)
+}
+
+type imagesLoadedMsg struct{ byURL map[string]*termimg.Image }
+
+// loadImagesCmd fetches and decodes the statement's images off the UI thread.
+func (m *WorkspaceModel) loadImagesCmd() tea.Cmd {
+	if m.imgProto == termimg.ProtoNone {
+		return nil
+	}
+	urls := imageURLs(m.q.Statement)
+	if len(urls) == 0 {
+		return nil
+	}
+	dir := m.imgDir
+	return func() tea.Msg {
+		out := make(map[string]*termimg.Image, len(urls))
+		for _, u := range urls {
+			if !allowedImageHost(u) {
+				continue
+			}
+			data, err := termimg.Fetch(context.Background(), dir, u)
+			if err != nil {
+				continue
+			}
+			im, err := termimg.Decode(data)
+			if err != nil {
+				continue
+			}
+			out[u] = im
+		}
+		return imagesLoadedMsg{byURL: out}
+	}
+}
+
+func allowedImageHost(rawURL string) bool {
+	for _, h := range []string{
+		"assets.leetcode.com", "assets.leetcode-cn.com",
+		"leetcode.com", "leetcode.cn", "pic.leetcode.cn", "pic.leetcode-cn.com",
+	} {
+		if strings.Contains(rawURL, "://"+h+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *WorkspaceModel) waitForFileChange() tea.Cmd {
@@ -303,6 +362,13 @@ func (m *WorkspaceModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case imagesLoadedMsg:
+		if len(msg.byURL) > 0 {
+			m.stmtImages = &statementImages{proto: m.imgProto, byURL: msg.byURL}
+			m.refreshStatement()
+		}
+		return m, nil
+
 	case remoteDoneMsg:
 		m.remoteRunning = false
 		m.remoteErr = msg.err
@@ -459,12 +525,7 @@ func (m *WorkspaceModel) refreshStatement() {
 			m.stmtWidth = w
 		}
 	}
-	body := m.q.Statement
-	if m.stmtRenderer != nil {
-		if out, err := m.stmtRenderer.Render(m.q.Statement); err == nil {
-			body = out
-		}
-	}
+	body := renderStatementMD(m.stmtRenderer, m.q.Statement, w, m.stmtImages)
 	m.statement.SetContent(strings.TrimRight(body, "\n"))
 }
 

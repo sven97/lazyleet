@@ -9,6 +9,7 @@ import (
 
 	"github.com/sven97/lazyleet/internal/leetcode"
 	"github.com/sven97/lazyleet/internal/store"
+	"github.com/sven97/lazyleet/internal/termimg"
 )
 
 func newDebugCmd(app *appContext) *cobra.Command {
@@ -126,6 +127,30 @@ func newDebugCmd(app *appContext) *cobra.Command {
 			return nil
 		},
 	})
+
+	var imgCols int
+	imgCmd := &cobra.Command{
+		Use:   "img <url>",
+		Short: "Fetch an image and print it to the terminal (test image rendering)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			data, err := termimg.Fetch(cmd.Context(), app.paths.ImageCacheDir, args[0])
+			if err != nil {
+				return err
+			}
+			im, err := termimg.Decode(data)
+			if err != nil {
+				return err
+			}
+			proto := termimg.Detect(app.cfg.Images)
+			body, rows := im.Render(proto, imgCols)
+			fmt.Fprintf(cmd.ErrOrStderr(), "protocol=%s  %d rows\n", proto, rows)
+			fmt.Fprintln(cmd.OutOrStdout(), body)
+			return nil
+		},
+	}
+	imgCmd.Flags().IntVar(&imgCols, "cols", 60, "target width in cells")
+	debug.AddCommand(imgCmd)
 
 	debug.AddCommand(&cobra.Command{
 		Use:   "plan <slug>",

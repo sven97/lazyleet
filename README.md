@@ -72,6 +72,7 @@ region: com                # com | cn
 default_language: python3
 editor: ""                 # empty -> $VISUAL, $EDITOR, then vi
 theme: default
+images: auto                # auto | off | blocks | kitty  (LAZYLEET_IMG overrides)
 cache_ttl: 24h
 keys: {}                   # semantic action -> key override
 workspace:

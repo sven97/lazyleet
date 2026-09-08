@@ -22,6 +22,7 @@ type Paths struct {
 	DatabaseFile  string // <DataDir>/lazyleet.db
 	AuthFile      string // <DataDir>/auth.json
 	WorkspaceRoot string // <DataDir>/workspace
+	ImageCacheDir string // <DataDir>/imgcache
 }
 
 // ResolvePaths computes every path from the environment. It does not touch the
@@ -40,6 +41,7 @@ func ResolvePaths() Paths {
 		DatabaseFile:  filepath.Join(dataDir, "lazyleet.db"),
 		AuthFile:      filepath.Join(dataDir, "auth.json"),
 		WorkspaceRoot: filepath.Join(dataDir, "workspace"),
+		ImageCacheDir: filepath.Join(dataDir, "imgcache"),
 	}
 }
 

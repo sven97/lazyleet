@@ -37,6 +37,7 @@ type Config struct {
 	DefaultLanguage string            `yaml:"default_language"`
 	Editor          string            `yaml:"editor"` // empty -> $VISUAL, $EDITOR, then vi
 	Theme           string            `yaml:"theme"`
+	Images          string            `yaml:"images"` // auto | off | blocks | kitty
 	CacheTTL        Duration          `yaml:"cache_ttl"`
 	Keys            map[string]string `yaml:"keys"` // semantic action -> key override
 	Workspace       WorkspaceConfig   `yaml:"workspace"`
@@ -57,6 +58,7 @@ func Default() Config {
 		DefaultLanguage: "python3",
 		Editor:          "",
 		Theme:           "default",
+		Images:          "auto",
 		CacheTTL:        defaultCacheTTL,
 		Keys:            map[string]string{},
 		Workspace: WorkspaceConfig{
@@ -116,6 +118,9 @@ func (c *Config) applyFallbacks() {
 	}
 	if c.Theme == "" {
 		c.Theme = d.Theme
+	}
+	if c.Images == "" {
+		c.Images = d.Images
 	}
 	if c.CacheTTL == 0 {
 		c.CacheTTL = d.CacheTTL
