@@ -388,13 +388,17 @@ done; submission history panel deferred. `internal/tui` + `cmd/lazyleet`.
 
 Append newest entries at the top. One entry per working session or milestone.
 
+- **2026-09-08 (b)** — Auth: avoid the macOS keychain prompt. `Read` now
+  iterates `TraverseCookieStores` and skips Chromium-family stores before
+  opening them (no prompt) unless `--browser` names one; `importFromBrowser`
+  does a keychain-free pass (Firefox/Safari) first, then a Chromium pass with a
+  "click Always Allow" note. `auth browsers` marks "· needs keychain".
+  +`NeedsKeychain` test.
 - **2026-09-08 (a)** — Auth reworked to browser cookie auto-import
   (`lazyleet auth` with no flags). New `internal/browsercookies` wraps
-  `browserutils/kooky` (`Read` + pure `Pick` group-by-browser chooser, 5 tests);
+  `browserutils/kooky` (`Read` + pure `Pick` group-by-browser chooser, tests);
   `cmd/lazyleet/auth.go` adds `--browser`, `auth browsers`, keeps
-  `--manual`/`--stdin`. `auth browsers` on this Mac sees chrome + safari + opera.
-  Happy path (real cookies + macOS Keychain prompt) is untested in-sandbox —
-  needs the user. `-race` + staticcheck clean. Not yet committed.
+  `--manual`/`--stdin`. `-race` + staticcheck clean.
 - **2026-09-07 (g)** — Phase 6 run/submit. `tui.RemoteJudge` interface +
   `RemoteOutcome` keep `internal/tui` transport-free; `cmd/lazyleet/
   remotejudge.go` implements it over the LeetCode client (Interpret/Submit →
@@ -468,6 +472,14 @@ Append newest entries at the top. One entry per working session or milestone.
 Technical discoveries, gotchas, and things that changed our understanding.
 Append newest at the top; reference the phase/task.
 
+- **2026-09-08** (auth) — the macOS "Chrome Safe Storage" keychain prompt fires
+  whenever kooky opens a Chromium-family store, and the "Always Allow" grant is
+  bound to the exact (unsigned) binary — so every `make build` / `go run`
+  re-prompts. Mitigations shipped: `Read` skips Chromium stores *before opening
+  them* unless `--browser` names one or a keychain-free pass found nothing, so
+  users logged in via Firefox/Safari never see the prompt; `auth browsers`
+  marks stores that "· needs keychain". User guidance: `go install` once to a
+  stable path and click "Always Allow".
 - **2026-09-08** (auth) — `browserutils/kooky` (the maintained fork of
   `zellyn/kooky`; `zellyn/kooky` fails `go get` — module path mismatch) adds
   ~10 indirect deps (its own pure-Go sqlite3/ese readers, keychain libs, lz4)

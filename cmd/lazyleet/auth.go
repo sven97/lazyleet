@@ -46,7 +46,7 @@ func newAuthCmd(app *appContext) *cobra.Command {
 				creds, err = credsFromPrompt(cmd, app)
 				source = "manual entry"
 			default:
-				creds, source, err = importFromBrowser(cmd.Context(), app, browser)
+				creds, source, err = importFromBrowser(cmd, app, browser)
 			}
 			if err != nil {
 				return err
@@ -138,33 +138,64 @@ func siteHost(app *appContext) string {
 	return "leetcode.com"
 }
 
-// importFromBrowser reads the LeetCode cookies from a browser store.
-func importFromBrowser(ctx context.Context, app *appContext, browser string) (leetcode.Credentials, string, error) {
+// importFromBrowser reads the LeetCode cookies from a browser store. Without an
+// explicit --browser it tries keychain-free browsers (Firefox, Safari) first
+// and only falls back to Chromium-family browsers — which prompt for the OS
+// keychain on macOS — if nothing else has the session.
+func importFromBrowser(cmd *cobra.Command, app *appContext, browser string) (leetcode.Credentials, string, error) {
+	ctx := cmd.Context()
 	host := siteHost(app)
-	cookies := browsercookies.Read(ctx, host, browser, "LEETCODE_SESSION", "csrftoken")
-	vals, source, ok := browsercookies.Pick(cookies, "LEETCODE_SESSION", "csrftoken")
-	if !ok {
-		stores := browsercookies.Stores(ctx)
-		msg := &strings.Builder{}
-		fmt.Fprintf(msg, "no LeetCode session cookies found")
-		if browser != "" {
-			fmt.Fprintf(msg, " for browser %q", browser)
+	names := []string{"LEETCODE_SESSION", "csrftoken"}
+
+	if browser != "" {
+		cookies := browsercookies.Read(ctx, host, browser, true, names...)
+		if vals, source, ok := browsercookies.Pick(cookies, names...); ok {
+			return credsFrom(app, vals, source)
 		}
-		fmt.Fprintf(msg, ".\nLog in at https://%s/ in one of these browsers, then run `lazyleet auth` again:\n", host)
-		if len(stores) == 0 {
-			msg.WriteString("  (no browser cookie stores detected on this machine)\n")
-		}
-		for _, s := range stores {
-			msg.WriteString("  " + s + "\n")
-		}
-		msg.WriteString("Or paste the cookies manually with `lazyleet auth --manual`.")
-		return leetcode.Credentials{}, "", fmt.Errorf("%s", msg.String())
+		return leetcode.Credentials{}, "", noCookiesError(ctx, host, browser)
 	}
+
+	// pass 1: browsers that don't need the keychain
+	cookies := browsercookies.Read(ctx, host, "", false, names...)
+	if vals, source, ok := browsercookies.Pick(cookies, names...); ok {
+		return credsFrom(app, vals, source)
+	}
+
+	// pass 2: Chromium-family (may prompt)
+	fmt.Fprintln(cmd.ErrOrStderr(),
+		"no LeetCode session in Firefox/Safari — checking Chrome-family browsers.\n"+
+			"macOS may ask for your login keychain password; choose \"Always Allow\" so it doesn't ask again.")
+	cookies = browsercookies.Read(ctx, host, "", true, names...)
+	if vals, source, ok := browsercookies.Pick(cookies, names...); ok {
+		return credsFrom(app, vals, source)
+	}
+	return leetcode.Credentials{}, "", noCookiesError(ctx, host, "")
+}
+
+func credsFrom(app *appContext, vals map[string]string, source string) (leetcode.Credentials, string, error) {
 	return leetcode.Credentials{
 		Session:   vals["LEETCODE_SESSION"],
 		CSRFToken: vals["csrftoken"],
 		Region:    string(app.cfg.Region),
 	}, source, nil
+}
+
+func noCookiesError(ctx context.Context, host, browser string) error {
+	var b strings.Builder
+	b.WriteString("no LeetCode session cookies found")
+	if browser != "" {
+		fmt.Fprintf(&b, " for browser %q", browser)
+	}
+	fmt.Fprintf(&b, ".\nLog in at https://%s/ in one of these browsers, then run `lazyleet auth` again:\n", host)
+	stores := browsercookies.Stores(ctx)
+	if len(stores) == 0 {
+		b.WriteString("  (no browser cookie stores detected on this machine)\n")
+	}
+	for _, s := range stores {
+		b.WriteString("  " + s + "\n")
+	}
+	b.WriteString("Or paste the cookies manually with `lazyleet auth --manual`.")
+	return fmt.Errorf("%s", b.String())
 }
 
 func credsFromPrompt(cmd *cobra.Command, app *appContext) (leetcode.Credentials, error) {

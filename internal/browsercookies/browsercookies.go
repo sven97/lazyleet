@@ -24,47 +24,91 @@ type Cookie struct {
 	Expired bool
 }
 
-// Read collects cookies whose domain ends with hostSuffix from every readable
-// browser cookie store. onlyBrowser (case-insensitive), if set, limits the
-// search to that browser. names, if given, restricts to those cookie names.
+// chromiumFamily browsers store cookies encrypted with a key held in the OS
+// keychain/secret service, so reading them triggers a permission prompt on
+// macOS. lazyleet only touches these when the user asks for one explicitly or
+// when no keychain-free browser has the cookies.
+var chromiumFamily = map[string]bool{
+	"chrome": true, "chromium": true, "brave": true, "edge": true,
+	"vivaldi": true, "opera": true, "opera-gx": true, "arc": true,
+	"yandex": true, "epic": true, "chrome-beta": true, "chrome-canary": true,
+}
+
+// NeedsKeychain reports whether importing from this browser prompts for the OS
+// keychain / secret service.
+func NeedsKeychain(browser string) bool {
+	return chromiumFamily[strings.ToLower(strings.TrimSpace(browser))]
+}
+
+// Read collects cookies whose domain ends with hostSuffix from browser cookie
+// stores.
 //
-// Per-store errors (locked file, denied Keychain, unsupported format) are
+//   - onlyBrowser (case-insensitive), if set, limits the search to that browser
+//     and always reads it (even if it needs the keychain).
+//   - When onlyBrowser is empty and allowKeychain is false, Chromium-family
+//     stores are skipped *before* they are opened, so no keychain prompt fires.
+//   - names, if given, restricts the result to those cookie names.
+//
+// Per-store errors (locked file, denied keychain, unsupported format) are
 // skipped so one unreadable browser does not fail the whole search.
-func Read(ctx context.Context, hostSuffix, onlyBrowser string, names ...string) []Cookie {
+func Read(ctx context.Context, hostSuffix, onlyBrowser string, allowKeychain bool, names ...string) []Cookie {
 	want := make(map[string]bool, len(names))
 	for _, n := range names {
 		want[n] = true
 	}
 
 	var out []Cookie
-	for c, err := range kooky.TraverseCookies(ctx, kooky.DomainHasSuffix(hostSuffix)) {
-		if err != nil || c == nil {
+	for store, err := range kooky.TraverseCookieStores(ctx) {
+		if err != nil || store == nil {
 			continue
 		}
-		if len(want) > 0 && !want[c.Name] {
+		br := safeBrowser(store)
+		switch {
+		case onlyBrowser != "":
+			if !strings.EqualFold(br, onlyBrowser) {
+				store.Close()
+				continue
+			}
+		case !allowKeychain && NeedsKeychain(br):
+			store.Close()
 			continue
 		}
-		br, prof := "", ""
-		if c.Browser != nil {
-			br, prof = c.Browser.Browser(), c.Browser.Profile()
+
+		prof := safeProfile(store)
+		for c, cerr := range store.TraverseCookies(kooky.DomainHasSuffix(hostSuffix)) {
+			if cerr != nil || c == nil {
+				continue
+			}
+			if len(want) > 0 && !want[c.Name] {
+				continue
+			}
+			out = append(out, Cookie{
+				Name:    c.Name,
+				Value:   c.Value,
+				Browser: br,
+				Profile: prof,
+				Expires: c.Expires,
+				Expired: !c.Expires.IsZero() && c.Expires.Before(time.Now()),
+			})
 		}
-		if onlyBrowser != "" && !strings.EqualFold(br, onlyBrowser) {
-			continue
-		}
-		out = append(out, Cookie{
-			Name:    c.Name,
-			Value:   c.Value,
-			Browser: br,
-			Profile: prof,
-			Expires: c.Expires,
-			Expired: !c.Expires.IsZero() && c.Expires.Before(time.Now()),
-		})
+		store.Close()
 	}
 	return out
 }
 
+func safeBrowser(s kooky.CookieStore) (name string) {
+	defer func() { _ = recover() }()
+	return s.Browser()
+}
+
+func safeProfile(s kooky.CookieStore) (p string) {
+	defer func() { _ = recover() }()
+	return s.Profile()
+}
+
 // Stores lists the browser cookie stores kooky can see on this machine,
-// formatted as "browser" or "browser (profile)".
+// formatted as "browser" or "browser (profile)", with " · needs keychain"
+// appended for Chromium-family browsers. Listing does not decrypt anything.
 func Stores(ctx context.Context) []string {
 	seen := map[string]bool{}
 	var out []string
@@ -72,17 +116,23 @@ func Stores(ctx context.Context) []string {
 		if err != nil || s == nil {
 			continue
 		}
-		label := s.Browser()
-		if label == "" {
+		br := safeBrowser(s)
+		if br == "" {
+			s.Close()
 			continue
 		}
-		if p := s.Profile(); p != "" && !strings.EqualFold(p, "default") {
+		label := br
+		if p := safeProfile(s); p != "" && !strings.EqualFold(p, "default") {
 			label += " (" + p + ")"
+		}
+		if NeedsKeychain(br) {
+			label += "  · needs keychain"
 		}
 		if !seen[label] {
 			seen[label] = true
 			out = append(out, label)
 		}
+		s.Close()
 	}
 	sort.Strings(out)
 	return out
@@ -112,7 +162,6 @@ func Pick(cookies []Cookie, want ...string) (values map[string]string, source st
 			groups[key] = g
 			order = append(order, key)
 		}
-		// keep the latest-expiring value for a repeated name
 		if prev, dup := g.vals[c.Name]; !dup || c.Expires.After(prev.Expires) {
 			g.vals[c.Name] = c
 		}

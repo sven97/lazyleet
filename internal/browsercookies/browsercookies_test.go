@@ -5,6 +5,19 @@ import (
 	"time"
 )
 
+func TestNeedsKeychain(t *testing.T) {
+	for _, b := range []string{"chrome", "Chrome", " brave ", "edge", "arc", "vivaldi"} {
+		if !NeedsKeychain(b) {
+			t.Errorf("NeedsKeychain(%q) = false, want true", b)
+		}
+	}
+	for _, b := range []string{"firefox", "safari", "librewolf", "", "lynx"} {
+		if NeedsKeychain(b) {
+			t.Errorf("NeedsKeychain(%q) = true, want false", b)
+		}
+	}
+}
+
 func TestPickPrefersCompleteFreshGroup(t *testing.T) {
 	future := time.Now().Add(24 * time.Hour)
 	past := time.Now().Add(-time.Hour)
