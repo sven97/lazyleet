@@ -401,14 +401,18 @@ done; submission history panel deferred. `internal/tui` + `cmd/lazyleet`.
 
 Append newest entries at the top. One entry per working session or milestone.
 
-- **2026-09-08 (h/i)** — Kitty image blank-gap: two bugs. (h) the transmit
-  escape was clipped by `bubbles/viewport` → split `Transmit()`/`Placeholders()`,
-  transmit is now a `View()` frame prefix. (i) **the Unicode-placeholder
-  protocol also needs a virtual-placement command** (`\x1b_Ga=p,U=1,i=<id>,
-  c=<cols>,r=<rows>`) after the transmit — without it the placeholder cells
-  render as nothing. Added it to `Image.Transmit(cols)`;
-  `renderStatementMD` now fills `statementImages.prefix` with
-  `transmit + a=p` for every image. `maxSide` 420. `-race` + staticcheck clean.
+- **2026-09-08 (h/i/j)** — Kitty image blank-gap: three stacked bugs.
+  (h) transmit escape clipped by `bubbles/viewport`. (i) missing the
+  Unicode-placeholder **virtual-placement** command
+  (`\x1b_Ga=p,U=1,i=<id>,c=<cols>,r=<rows>` after the transmit — without it the
+  cells render as nothing). (j) **bubbletea's renderer also truncates every
+  frame line to the terminal width**, so the transmit can't be a `View()`
+  prefix either. Fix: `tui.ImageWriter` wraps the program's output
+  (`tea.WithOutput`); `queueImagePrefix` hands the transmit+placement blob to
+  it and `ImageWriter.Write` flushes queued bytes ahead of the next frame under
+  one mutex (no race with the render goroutine). `Image.Transmit(cols)` /
+  `Image.Placeholders(cols)` split; only placeholder rows go in the viewport.
+  Encoder verified with `debug img` (crisp keypad on Ghostty). `maxSide` 420. `-race` + staticcheck clean.
 - **2026-09-08 (g)** — Statement wrap bug + browse-preview images. glamour's
   dark style renders ~4 cells wider than its word-wrap (document margin + block
   indents), so preview lines overflowed the pane and the terminal clipped them

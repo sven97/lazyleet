@@ -10,6 +10,18 @@ import (
 	"github.com/sven97/lazyleet/internal/termimg"
 )
 
+// queueImagePrefix hands the Kitty transmit+placement escapes to the
+// ImageWriter so they're emitted just before the next frame (they can't ride in
+// View — bubbletea truncates frame lines to the terminal width). `last` is the
+// blob queued previously; the returned value should be stored back to dedupe.
+func queueImagePrefix(iw *ImageWriter, si *statementImages, last string) string {
+	if iw == nil || si == nil || si.prefix == "" || si.prefix == last {
+		return last
+	}
+	iw.Queue(si.prefix)
+	return si.prefix
+}
+
 // glamourMargin is how much wider than its word-wrap glamour's dark style can
 // render a line (document margin + block indents). We wrap that much narrower
 // and still clamp as a safety net.
@@ -59,13 +71,6 @@ type statementImages struct {
 	proto  termimg.Protocol
 	byURL  map[string]*termimg.Image
 	prefix string
-}
-
-func (si *statementImages) transmitPrefix() string {
-	if si == nil {
-		return ""
-	}
-	return si.prefix
 }
 
 // imageURLs returns the distinct image URLs referenced in a markdown statement.

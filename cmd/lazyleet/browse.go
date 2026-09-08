@@ -23,12 +23,14 @@ func runBrowse(app *appContext) error {
 	defer data.Close()
 
 	for {
+		iw := tui.NewImageWriter(os.Stdout)
 		bm := tui.NewBrowseModel(data)
-		bm.EnableImages(termimg.Detect(app.cfg.Images), app.paths.ImageCacheDir)
+		bm.EnableImages(termimg.Detect(app.cfg.Images), app.paths.ImageCacheDir, iw)
 		final, err := tea.NewProgram(
 			bm,
 			tea.WithAltScreen(),
 			tea.WithMouseCellMotion(),
+			tea.WithOutput(iw),
 		).Run()
 		if err != nil {
 			return err

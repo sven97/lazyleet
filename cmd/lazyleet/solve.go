@@ -80,9 +80,12 @@ func (a *appContext) openWorkspace(ctx context.Context, slug, lang string, refre
 	if err != nil {
 		return err
 	}
-	m.EnableImages(termimg.Detect(a.cfg.Images), a.paths.ImageCacheDir)
+	iw := tui.NewImageWriter(os.Stdout)
+	m.EnableImages(termimg.Detect(a.cfg.Images), a.paths.ImageCacheDir, iw)
 
-	_, err = tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion()).Run()
+	_, err = tea.NewProgram(m,
+		tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithOutput(iw),
+	).Run()
 	return err
 }
 

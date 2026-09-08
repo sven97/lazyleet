@@ -74,8 +74,10 @@ type BrowseModel struct {
 	stmtWidth      int
 	previewTab     int // 0 = statement, 1 = topics
 
-	imgProto termimg.Protocol
-	imgDir   string
+	imgProto   termimg.Protocol
+	imgDir     string
+	imgWriter  *ImageWriter
+	imgWritten string
 
 	spin      spinner.Model
 	syncing   bool
@@ -560,10 +562,12 @@ func (m *BrowseModel) relayout() {
 	m.clampCursor()
 }
 
-// EnableImages turns on inline preview images.
-func (m *BrowseModel) EnableImages(proto termimg.Protocol, cacheDir string) {
+// EnableImages turns on inline preview images. iw must be the same ImageWriter
+// passed to tea.WithOutput.
+func (m *BrowseModel) EnableImages(proto termimg.Protocol, cacheDir string, iw *ImageWriter) {
 	m.imgProto = proto
 	m.imgDir = cacheDir
+	m.imgWriter = iw
 }
 
 func (m *BrowseModel) renderPreview(md string) {
@@ -590,6 +594,7 @@ func (m *BrowseModel) refreshPreviewContent() {
 	}
 	body := renderStatementMD(m.stmtRenderer, m.previewMD, m.previewVP.Width, m.previewImages)
 	m.previewVP.SetContent(strings.TrimRight(body, "\n"))
+	m.imgWritten = queueImagePrefix(m.imgWriter, m.previewImages, m.imgWritten)
 }
 
 type previewImagesMsg struct {

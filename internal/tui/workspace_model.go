@@ -50,6 +50,8 @@ type WorkspaceModel struct {
 	stmtImages   *statementImages
 	imgProto     termimg.Protocol
 	imgDir       string
+	imgWriter    *ImageWriter
+	imgWritten   string
 	codeSrc      string
 	ranSrc       string // codeSrc as of the last local run started
 
@@ -131,11 +133,12 @@ func NewWorkspaceModel(ws *workspace.Workspace, q leetcode.Question, editor stri
 	return m, nil
 }
 
-// EnableImages turns on inline statement images using the given protocol and
-// on-disk cache directory. Call before running the program.
-func (m *WorkspaceModel) EnableImages(proto termimg.Protocol, cacheDir string) {
+// EnableImages turns on inline statement images. iw must be the same
+// ImageWriter passed to tea.WithOutput. Call before running the program.
+func (m *WorkspaceModel) EnableImages(proto termimg.Protocol, cacheDir string, iw *ImageWriter) {
 	m.imgProto = proto
 	m.imgDir = cacheDir
+	m.imgWriter = iw
 }
 
 // Init implements tea.Model.
@@ -526,6 +529,7 @@ func (m *WorkspaceModel) refreshStatement() {
 	}
 	body := renderStatementMD(m.stmtRenderer, m.q.Statement, w, m.stmtImages)
 	m.statement.SetContent(strings.TrimRight(body, "\n"))
+	m.imgWritten = queueImagePrefix(m.imgWriter, m.stmtImages, m.imgWritten)
 }
 
 func (m *WorkspaceModel) refreshCode() {
@@ -581,10 +585,7 @@ func (m *WorkspaceModel) View() string {
 		)
 		body = cols
 	}
-	frame := lipgloss.JoinVertical(lipgloss.Left, body, m.renderStatusBar())
-	// Kitty image data is transmitted once as a frame prefix; the diffing
-	// renderer only re-sends it when line 0 changes (resize / full repaint).
-	return m.stmtImages.transmitPrefix() + frame
+	return lipgloss.JoinVertical(lipgloss.Left, body, m.renderStatusBar())
 }
 
 func (m *WorkspaceModel) renderPane(p Pane, r Rect, focused bool) string {
