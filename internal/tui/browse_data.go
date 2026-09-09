@@ -45,8 +45,13 @@ type BrowseData interface {
 	Auth(ctx context.Context) AuthState
 	// LastSync reports when the problem cache was last refreshed.
 	LastSync(ctx context.Context) (t time.Time, ok bool)
-	// Sync refreshes the cache from LeetCode and returns the problem count.
+	// Sync refreshes the whole problem catalog from LeetCode and returns the
+	// problem count.
 	Sync(ctx context.Context) (int, error)
+	// SyncProgress refreshes only the signed-in user's solve status (a few
+	// requests, not the whole catalog) and returns the solved count. It is a
+	// no-op returning (0, nil) when not authenticated.
+	SyncProgress(ctx context.Context) (int, error)
 	// LoadStatement returns a problem's statement as Markdown (cache then API).
 	LoadStatement(ctx context.Context, slug string) (string, error)
 	// Plans lists the study plans to show in the sidebar.

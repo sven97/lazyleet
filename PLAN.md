@@ -406,6 +406,16 @@ done; submission history panel deferred. `internal/tui` + `cmd/lazyleet`.
 
 Append newest entries at the top. One entry per working session or milestone.
 
+- **2026-09-08 (p)** — Lightweight progress sync. Splitting "refresh the whole
+  catalog" from "refresh my solve status". New `fetchAndCacheProgress` pulls the
+  server-filtered `problemsetQuestionList` for `status:"AC"` and `"TRIED"` (a
+  few pages each vs. ~41 for the full list) and calls the new
+  `store.ReplaceProblemStatuses` — clears all statuses, then re-marks ac/notac
+  by slug (chunked `IN`, `updated_at` left alone so catalog-staleness tracking
+  is unaffected). Exposed as `BrowseData.SyncProgress` and `lazyleet sync
+  --progress`. `BrowseModel` now runs it in the background once per session on
+  open when signed in and the catalog is already cached (`maybeSyncProgress`,
+  replaces the heavier `maybeAutoSync`); status bar shows "syncing progress".
 - **2026-09-08 (o)** — Browse fixes from user testing. (1) **Long list broke the
   layout**: `listRows()` was off by one (frame eats border+title, body adds its
   own column header → data rows = `List.H - 4`, was `- 3`), so a full list

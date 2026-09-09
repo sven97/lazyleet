@@ -87,6 +87,18 @@ func (b *browseData) Sync(ctx context.Context) (int, error) {
 	return n, nil
 }
 
+func (b *browseData) SyncProgress(ctx context.Context) (int, error) {
+	creds, _ := b.app.loadCredentials()
+	if creds.Anonymous() {
+		return 0, nil
+	}
+	client, err := b.app.newClient()
+	if err != nil {
+		return 0, err
+	}
+	return fetchAndCacheProgress(ctx, client, b.db)
+}
+
 func (b *browseData) LoadStatement(ctx context.Context, slug string) (string, error) {
 	if q, ok := leetcode.Fixture(slug); ok {
 		return q.Statement, nil

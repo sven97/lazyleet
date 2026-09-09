@@ -83,12 +83,13 @@ type BrowseModel struct {
 
 	auth AuthState
 
-	spin       spinner.Model
-	syncing    bool
-	autoSynced bool // guards the one-shot progress sync on browse open
-	statusMsg  string
-	loadErr    error
-	lastSync   time.Time
+	spin        spinner.Model
+	syncing     bool
+	autoSynced  bool // guards the one-shot progress sync on browse open
+	progressing bool // a background SyncProgress is in flight
+	statusMsg   string
+	loadErr     error
+	lastSync    time.Time
 
 	// Chosen is the slug the user opened, set just before tea.Quit.
 	Chosen string
@@ -113,6 +114,10 @@ type statementMsg struct {
 type syncDoneMsg struct {
 	count int
 	err   error
+}
+type progressDoneMsg struct {
+	solved int
+	err    error
 }
 type previewDebounceMsg struct{ slug string }
 
@@ -190,30 +195,26 @@ func (m *BrowseModel) syncCmd() tea.Cmd {
 	}
 }
 
-// maybeAutoSync fires a one-shot background sync when signed in so the browse
-// list reflects the user's real solve history. It runs when the cache has no
-// per-user status yet (last sync was anonymous) or is more than 6h stale. It
-// needs both the auth state and the problem rows loaded, so it is called from
-// both the browseLoadedMsg and authLoadedMsg handlers.
-func (m *BrowseModel) maybeAutoSync() tea.Cmd {
+func (m *BrowseModel) progressCmd() tea.Cmd {
+	return func() tea.Msg {
+		n, err := m.data.SyncProgress(context.Background())
+		return progressDoneMsg{solved: n, err: err}
+	}
+}
+
+// maybeSyncProgress kicks a one-shot background refresh of the signed-in user's
+// solve status (a few requests, not the whole catalog) so the ✓ marks and
+// per-plan counts reflect problems solved on the web. Runs once per session,
+// only when signed in and the problem catalog is already cached. Called from
+// both the browseLoadedMsg and authLoadedMsg handlers since either may land
+// last.
+func (m *BrowseModel) maybeSyncProgress() tea.Cmd {
 	if m.autoSynced || m.syncing || !m.auth.Authed || len(m.allRows) == 0 {
 		return nil
 	}
-	hasStatus := false
-	for _, r := range m.allRows {
-		if r.Status != "" {
-			hasStatus = true
-			break
-		}
-	}
-	stale := m.lastSync.IsZero() || time.Since(m.lastSync) > 6*time.Hour
-	if hasStatus && !stale {
-		return nil
-	}
 	m.autoSynced = true
-	m.syncing = true
-	m.statusMsg = "syncing your progress…"
-	return tea.Batch(m.syncCmd(), m.spin.Tick)
+	m.progressing = true
+	return tea.Batch(m.progressCmd(), m.spin.Tick)
 }
 
 func (m *BrowseModel) debouncePreview() tea.Cmd {
@@ -255,11 +256,11 @@ func (m *BrowseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.lastSync = msg.lastSync
 		}
 		m.rebuildView()
-		return m, tea.Batch(m.debouncePreview(), m.maybeAutoSync())
+		return m, tea.Batch(m.debouncePreview(), m.maybeSyncProgress())
 
 	case authLoadedMsg:
 		m.auth = msg.a
-		return m, m.maybeAutoSync()
+		return m, m.maybeSyncProgress()
 
 	case plansLoadedMsg:
 		m.sources = m.sources[:1] // keep "All Problems"
@@ -332,6 +333,15 @@ func (m *BrowseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.statusMsg = fmt.Sprintf("synced %d problems", msg.count)
+		return m, m.loadProblems()
+
+	case progressDoneMsg:
+		m.progressing = false
+		if msg.err != nil {
+			m.statusMsg = "progress sync failed: " + msg.err.Error()
+			return m, nil
+		}
+		m.statusMsg = fmt.Sprintf("progress synced · %d solved", msg.solved)
 		return m, m.loadProblems()
 
 	case tea.MouseMsg:

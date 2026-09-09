@@ -152,3 +152,43 @@ func TestProblemDetailTTL(t *testing.T) {
 		t.Fatalf("stale detail should be ErrNotCached, got %v", err)
 	}
 }
+
+func TestReplaceProblemStatuses(t *testing.T) {
+	s, _ := Open(":memory:")
+	defer s.Close()
+	seedProblems(t, s) // two-sum starts "ac"
+	ctx := context.Background()
+
+	n, err := s.ReplaceProblemStatuses(ctx,
+		[]string{"add-two-numbers", "not-cached"}, // ac
+		[]string{"median"},                        // tried
+	)
+	if err != nil {
+		t.Fatalf("ReplaceProblemStatuses: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("ac rows affected = %d, want 1 (not-cached is ignored)", n)
+	}
+
+	got := map[string]string{}
+	rows, _ := s.ListProblems(ctx, ProblemFilter{})
+	for _, r := range rows {
+		got[r.Slug] = r.Status
+	}
+	want := map[string]string{"two-sum": "", "add-two-numbers": "ac", "median": "notac"}
+	for slug, w := range want {
+		if got[slug] != w {
+			t.Errorf("%s status = %q, want %q (prior statuses must be cleared)", slug, got[slug], w)
+		}
+	}
+
+	// updated_at must be untouched so catalog-staleness tracking is unaffected.
+	before, _ := s.ProblemsLastSynced(ctx)
+	if _, err := s.ReplaceProblemStatuses(ctx, []string{"two-sum"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := s.ProblemsLastSynced(ctx)
+	if !before.Equal(after) {
+		t.Errorf("ProblemsLastSynced moved %v -> %v; ReplaceProblemStatuses must not touch updated_at", before, after)
+	}
+}

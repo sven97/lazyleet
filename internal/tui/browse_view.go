@@ -309,6 +309,8 @@ func (m *BrowseModel) renderStatusBar() string {
 	left := ""
 	if m.syncing {
 		left = m.th.Spinner.Render(m.spin.View()) + " syncing "
+	} else if m.progressing {
+		left = m.th.Spinner.Render(m.spin.View()) + " syncing progress "
 	} else if m.statusMsg != "" {
 		left = m.statusMsg + "  "
 	}

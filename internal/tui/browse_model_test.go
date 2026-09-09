@@ -12,21 +12,28 @@ import (
 )
 
 type fakeBrowseData struct {
-	rows    []BrowseRow
-	plans   []PlanRef
-	planMap map[string][]string
-	stmts   map[string]string
-	synced  int
+	rows           []BrowseRow
+	plans          []PlanRef
+	planMap        map[string][]string
+	stmts          map[string]string
+	synced         int
+	authed         bool
+	progressCalls  int
+	progressSolved int
 }
 
 func (f *fakeBrowseData) ListProblems(context.Context) ([]BrowseRow, error) { return f.rows, nil }
 func (f *fakeBrowseData) Auth(context.Context) AuthState {
-	return AuthState{Authed: false, Region: "com"}
+	return AuthState{Authed: f.authed, Region: "com"}
 }
 func (f *fakeBrowseData) LastSync(context.Context) (time.Time, bool) {
 	return time.Now().Add(-2 * time.Hour), true
 }
 func (f *fakeBrowseData) Sync(context.Context) (int, error) { f.synced++; return len(f.rows), nil }
+func (f *fakeBrowseData) SyncProgress(context.Context) (int, error) {
+	f.progressCalls++
+	return f.progressSolved, nil
+}
 func (f *fakeBrowseData) LoadStatement(_ context.Context, slug string) (string, error) {
 	return f.stmts[slug], nil
 }
@@ -277,5 +284,46 @@ func TestBrowseViewNeverOverflowsTerminal(t *testing.T) {
 		if got := lipgloss.Height(m.View()); got != h {
 			t.Errorf("termH=%d: View() rendered %d lines, want exactly %d (a taller view pushes panes off-screen)", h, got, h)
 		}
+	}
+}
+
+func TestBrowseAutoSyncsProgressWhenSignedIn(t *testing.T) {
+	f := newFakeData()
+	f.authed = true
+	f.progressSolved = 7
+	m := NewBrowseModel(f)
+	step(&m, tea.WindowSizeMsg{Width: 150, Height: 40})
+
+	// auth lands first, rows not loaded yet -> must not fire
+	step(&m, authLoadedMsg{a: AuthState{Authed: true}})
+	if f.progressCalls != 0 {
+		t.Fatalf("progress sync fired before the catalog loaded (%d calls)", f.progressCalls)
+	}
+
+	updated, cmd := m.Update(browseLoadedMsg{rows: f.rows})
+	m = updated.(*BrowseModel)
+	if !m.progressing {
+		t.Fatal("expected a background progress sync once rows + auth are ready")
+	}
+	drain(&m, cmd)
+	if f.progressCalls != 1 {
+		t.Fatalf("SyncProgress called %d times, want 1", f.progressCalls)
+	}
+	if m.progressing {
+		t.Fatal("progressing should clear after progressDoneMsg")
+	}
+
+	// one-shot: a later reload must not re-trigger it
+	step(&m, browseLoadedMsg{rows: f.rows})
+	if f.progressCalls != 1 {
+		t.Fatalf("progress sync should be one-shot, got %d calls", f.progressCalls)
+	}
+}
+
+func TestBrowseSkipsProgressSyncWhenAnonymous(t *testing.T) {
+	m, f := bootBrowse(t) // fake Auth() is anonymous by default
+	step(&m, authLoadedMsg{a: AuthState{Authed: false}})
+	if f.progressCalls != 0 {
+		t.Fatalf("anonymous session must not sync progress, got %d calls", f.progressCalls)
 	}
 }

@@ -34,6 +34,30 @@ func fetchAndCacheProblems(ctx context.Context, client *leetcode.Client, db *sto
 	return db.ProblemCount(ctx)
 }
 
+// fetchAndCacheProgress refreshes only the caller's solve status by pulling the
+// server-filtered "accepted" and "attempted" problem lists (a few pages each,
+// vs. the whole catalog) and rewriting the status column. Returns the number of
+// solved problems. Requires an authenticated client.
+func fetchAndCacheProgress(ctx context.Context, client *leetcode.Client, db *store.Store) (int, error) {
+	ac, err := client.ListAllProblems(ctx, leetcode.ProblemFilter{Status: "AC"}, nil)
+	if err != nil {
+		return 0, err
+	}
+	tried, err := client.ListAllProblems(ctx, leetcode.ProblemFilter{Status: "TRIED"}, nil)
+	if err != nil {
+		return 0, err
+	}
+	acSlugs := make([]string, len(ac))
+	for i, p := range ac {
+		acSlugs[i] = p.Slug
+	}
+	triedSlugs := make([]string, len(tried))
+	for i, p := range tried {
+		triedSlugs[i] = p.Slug
+	}
+	return db.ReplaceProblemStatuses(ctx, acSlugs, triedSlugs)
+}
+
 // cacheBundledPlans writes every compiled-in study plan into the store.
 func cacheBundledPlans(ctx context.Context, db *store.Store) (int, error) {
 	all := plans.All()

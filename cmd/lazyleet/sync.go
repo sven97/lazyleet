@@ -8,7 +8,7 @@ import (
 )
 
 func newSyncCmd(app *appContext) *cobra.Command {
-	var force bool
+	var force, progressOnly bool
 
 	cmd := &cobra.Command{
 		Use:   "sync",
@@ -22,6 +22,25 @@ func newSyncCmd(app *appContext) *cobra.Command {
 
 			ctx := cmd.Context()
 			out := cmd.OutOrStdout()
+
+			if progressOnly {
+				creds, _ := app.loadCredentials()
+				if creds.Anonymous() {
+					return fmt.Errorf("not signed in — run `lazyleet auth` first")
+				}
+				client, err := app.newClient()
+				if err != nil {
+					return err
+				}
+				start := time.Now()
+				solved, err := fetchAndCacheProgress(ctx, client, db)
+				if err != nil {
+					return fmt.Errorf("progress: %w", err)
+				}
+				fmt.Fprintf(out, "updated solve status: %d solved in %s\n",
+					solved, time.Since(start).Round(time.Millisecond))
+				return nil
+			}
 
 			if !force {
 				if fresh, _ := db.ProblemsFresh(ctx, app.cfg.CacheTTL.D()); fresh {
@@ -60,5 +79,6 @@ func newSyncCmd(app *appContext) *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&force, "force", false, "refresh even if the cache is still fresh")
+	cmd.Flags().BoolVar(&progressOnly, "progress", false, "only refresh your solve status (a few requests, not the whole catalog)")
 	return cmd
 }

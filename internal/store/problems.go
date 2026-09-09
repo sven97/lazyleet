@@ -174,6 +174,59 @@ func (s *Store) SetProblemStatus(ctx context.Context, slug, status string) error
 	return err
 }
 
+// ReplaceProblemStatuses rewrites the solve status of every cached problem from
+// the user's solved ("ac") and attempted ("notac") slug sets — a lightweight
+// alternative to a full catalog sync. It clears all existing statuses first so
+// an un-accepted problem doesn't linger. updated_at is deliberately left alone
+// so catalog-staleness tracking is unaffected. Returns how many rows were
+// marked "ac".
+func (s *Store) ReplaceProblemStatuses(ctx context.Context, acSlugs, triedSlugs []string) (int, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx, `UPDATE problems SET status = '' WHERE status != ''`); err != nil {
+		return 0, err
+	}
+
+	mark := func(slugs []string, status string) (int64, error) {
+		var affected int64
+		const chunk = 800 // stay well under SQLite's variable limit
+		for start := 0; start < len(slugs); start += chunk {
+			end := min(start+chunk, len(slugs))
+			batch := slugs[start:end]
+			ph := strings.TrimSuffix(strings.Repeat("?,", len(batch)), ",")
+			args := make([]any, 0, len(batch)+1)
+			args = append(args, status)
+			for _, sl := range batch {
+				args = append(args, sl)
+			}
+			res, err := tx.ExecContext(ctx,
+				`UPDATE problems SET status = ? WHERE slug IN (`+ph+`)`, args...)
+			if err != nil {
+				return affected, err
+			}
+			n, _ := res.RowsAffected()
+			affected += n
+		}
+		return affected, nil
+	}
+
+	acCount, err := mark(acSlugs, "ac")
+	if err != nil {
+		return 0, err
+	}
+	if _, err := mark(triedSlugs, "notac"); err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return int(acCount), nil
+}
+
 // ProblemCount returns how many problem rows are cached.
 func (s *Store) ProblemCount(ctx context.Context) (int, error) {
 	var n int
