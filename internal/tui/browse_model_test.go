@@ -8,6 +8,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 type fakeBrowseData struct {
@@ -259,5 +260,22 @@ func TestBrowseSyncFlow(t *testing.T) {
 	}
 	if m.syncing {
 		t.Fatal("syncing should clear after syncDoneMsg")
+	}
+}
+
+func TestBrowseViewNeverOverflowsTerminal(t *testing.T) {
+	f := newFakeData()
+	f.rows = nil
+	for i := 1; i <= 400; i++ {
+		f.rows = append(f.rows, BrowseRow{FrontendID: i, Slug: "p", Title: "Problem Title", Difficulty: "Easy"})
+	}
+	for _, h := range []int{24, 30, 45, 60, 90} {
+		m := NewBrowseModel(f)
+		step(&m, tea.WindowSizeMsg{Width: 150, Height: h})
+		step(&m, browseLoadedMsg{rows: f.rows})
+		step(&m, plansLoadedMsg{plans: f.plans})
+		if got := lipgloss.Height(m.View()); got != h {
+			t.Errorf("termH=%d: View() rendered %d lines, want exactly %d (a taller view pushes panes off-screen)", h, got, h)
+		}
 	}
 }
