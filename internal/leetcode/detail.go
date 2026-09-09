@@ -4,12 +4,33 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 
 	htmltomarkdown "github.com/JohannesKaufmann/html-to-markdown/v2"
 
 	"github.com/sven97/lazyleet/internal/testcase"
 )
+
+var (
+	supRe = regexp.MustCompile(`(?is)<sup>\s*(.*?)\s*</sup>`)
+	subRe = regexp.MustCompile(`(?is)<sub>\s*(.*?)\s*</sub>`)
+)
+
+// preprocessStatementHTML rewrites tags the HTML→Markdown converter would
+// otherwise flatten lossily. LeetCode writes exponents as <sup> (e.g.
+// "10<sup>15</sup>"), which the converter drops, turning it into "1015".
+func preprocessStatementHTML(h string) string {
+	for i := 0; i < 5; i++ { // a few passes to unwrap the rare nested <sup>
+		next := supRe.ReplaceAllString(h, "^$1")
+		next = subRe.ReplaceAllString(next, "_$1")
+		if next == h {
+			break
+		}
+		h = next
+	}
+	return h
+}
 
 type questionDataResp struct {
 	Question *struct {
@@ -56,7 +77,7 @@ func (c *Client) QuestionDetail(ctx context.Context, slug string) (Question, err
 	meta, metaErr := parseMeta(q.MetaData)
 
 	statement := q.Content
-	if md, err := htmltomarkdown.ConvertString(q.Content); err == nil {
+	if md, err := htmltomarkdown.ConvertString(preprocessStatementHTML(q.Content)); err == nil {
 		statement = md
 	}
 
