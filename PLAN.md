@@ -623,6 +623,10 @@ Append newest entries at the top. One entry per working session or milestone.
 Technical discoveries, gotchas, and things that changed our understanding.
 Append newest at the top; reference the phase/task.
 
+- **2026-09-09** (leetcode) — `html-to-markdown/v2` flattens `<sup>`/`<sub>` to
+  bare text, so LeetCode constraints like `10<sup>15</sup>` became `1015`.
+  `preprocessStatementHTML` rewrites them to `^`/`_` before conversion. Cached
+  details keep the old text for up to `cache_ttl` (24h) unless force-refetched.
 - **2026-09-08** (tui) — never call `glamour.WithAutoStyle()` (or anything that
   probes the terminal / reads stdin) once bubbletea is running — it steals
   keypresses. Use `glamour.WithStandardStyle("dark")`. Same rule as the
