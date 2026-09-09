@@ -73,11 +73,20 @@ func renderResults(th Theme, res *runner.Result, runErr error, running bool, spi
 	}
 
 	var b strings.Builder
-	head := fmt.Sprintf("%d/%d passed", res.Passed, res.Total)
-	if res.OK() {
-		b.WriteString(th.Pass.Render("✓ " + head))
-	} else {
-		b.WriteString(th.Fail.Render("✗ " + head))
+	verified := 0
+	for _, c := range res.Cases {
+		if c.Status != runner.StatusUnknown {
+			verified++
+		}
+	}
+	switch {
+	case len(res.Cases) > 0 && verified == 0:
+		// ran fine, but no example had an expected output to check against
+		b.WriteString(th.Muted.Render(fmt.Sprintf("• %d ran · add an \"out\" to verify", len(res.Cases))))
+	case res.Passed == verified:
+		b.WriteString(th.Pass.Render(fmt.Sprintf("✓ %d/%d passed", res.Passed, verified)))
+	default:
+		b.WriteString(th.Fail.Render(fmt.Sprintf("✗ %d/%d passed", res.Passed, verified)))
 	}
 	b.WriteString(th.Muted.Render(fmt.Sprintf("  ·  %dms", res.Elapsed.Milliseconds())))
 	b.WriteString("\n")
@@ -108,6 +117,9 @@ func renderResults(th Theme, res *runner.Result, runErr error, running bool, spi
 		}
 		if c.Status == runner.StatusPass && c.Expected != "" {
 			b.WriteString(th.Muted.Render("  out  ") + truncate(c.Actual, width-7) + "\n")
+		}
+		if c.Status == runner.StatusUnknown && c.Actual != "" {
+			b.WriteString(th.Muted.Render("  got  ") + truncate(c.Actual, width-7) + "\n")
 		}
 		if c.Err != "" {
 			b.WriteString(th.ErrorText.Render("  err  ") + truncate(c.Err, width-7) + "\n")

@@ -81,6 +81,12 @@ func Scaffold(root string, q leetcode.Question, lang string) (*Workspace, error)
 	if err := writeIfAbsent(w.TestsPath, renderCases(q.ExampleCases)); err != nil {
 		return nil, err
 	}
+	// A workspace scaffolded before we learned to scrape example outputs has an
+	// output-less testcases file; fill in the blanks from the (now richer) cases
+	// without disturbing anything the user added or edited.
+	if err := backfillExpectedOutputs(w.TestsPath, q.ExampleCases); err != nil {
+		return nil, err
+	}
 
 	// meta.json is always refreshed — it is derived, never user-edited.
 	m := meta{
@@ -141,6 +147,50 @@ func (w *Workspace) AppendCases(add []testcase.Case) error {
 	}
 	defer f.Close()
 	return testcase.Write(f, merged)
+}
+
+// backfillExpectedOutputs fills empty "out" fields in an existing testcases file
+// from cases that now carry expected outputs, matching on the input tuple. It
+// is a no-op if the file already has any expected output (so it never fights a
+// user who filled them in) or if there's nothing to add.
+func backfillExpectedOutputs(path string, withOutputs []testcase.Case) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	existing, err := testcase.Parse(f)
+	f.Close()
+	if err != nil || len(existing) == 0 {
+		return err
+	}
+	want := map[string]string{}
+	for _, c := range withOutputs {
+		if c.Out != "" {
+			want[strings.Join(c.In, "\x00")] = c.Out
+		}
+	}
+	if len(want) == 0 {
+		return nil
+	}
+	changed := false
+	for i := range existing {
+		if existing[i].Out != "" {
+			return nil // already has answers — leave the file alone
+		}
+		if o, ok := want[strings.Join(existing[i].In, "\x00")]; ok {
+			existing[i].Out = o
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
+	}
+	out, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	return testcase.Write(out, existing)
 }
 
 func renderCases(cs []testcase.Case) []byte {
