@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
 	"regexp"
 	"strings"
 
@@ -17,17 +18,57 @@ var (
 	subRe = regexp.MustCompile(`(?is)<sub>\s*(.*?)\s*</sub>`)
 )
 
+// Unicode super/subscript forms for the characters that actually turn up in
+// LeetCode statements (digits and a few operators). Anything outside these maps
+// falls back to caret / underscore notation.
+var (
+	superscriptRunes = map[rune]rune{
+		'0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴', '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹',
+		'+': '⁺', '-': '⁻', '=': '⁼', '(': '⁽', ')': '⁾', 'n': 'ⁿ', 'i': 'ⁱ',
+	}
+	subscriptRunes = map[rune]rune{
+		'0': '₀', '1': '₁', '2': '₂', '3': '₃', '4': '₄', '5': '₅', '6': '₆', '7': '₇', '8': '₈', '9': '₉',
+		'+': '₊', '-': '₋', '=': '₌', '(': '₍', ')': '₎',
+	}
+)
+
+func mapRunes(s string, table map[rune]rune) (string, bool) {
+	if s == "" {
+		return "", false
+	}
+	out := make([]rune, 0, len(s))
+	for _, r := range s {
+		m, ok := table[r]
+		if !ok {
+			return "", false
+		}
+		out = append(out, m)
+	}
+	return string(out), true
+}
+
 // preprocessStatementHTML rewrites tags the HTML→Markdown converter would
 // otherwise flatten lossily. LeetCode writes exponents as <sup> (e.g.
-// "10<sup>15</sup>"), which the converter drops, turning it into "1015".
+// "10<sup>15</sup>"), which the converter drops, turning it into "1015". We
+// render true Unicode superscript when every character maps (the common
+// digit-only case → "10¹⁵"), and fall back to "^15" / "_2" otherwise.
 func preprocessStatementHTML(h string) string {
-	for i := 0; i < 5; i++ { // a few passes to unwrap the rare nested <sup>
-		next := supRe.ReplaceAllString(h, "^$1")
-		next = subRe.ReplaceAllString(next, "_$1")
-		if next == h {
+	repl := func(re *regexp.Regexp, table map[rune]rune, prefix string) {
+		h = re.ReplaceAllStringFunc(h, func(match string) string {
+			inner := strings.TrimSpace(re.FindStringSubmatch(match)[1])
+			if u, ok := mapRunes(inner, table); ok {
+				return u
+			}
+			return prefix + inner
+		})
+	}
+	for i := 0; i < 5; i++ { // a few passes to unwrap the rare nested tag
+		before := h
+		repl(supRe, superscriptRunes, "^")
+		repl(subRe, subscriptRunes, "_")
+		if h == before {
 			break
 		}
-		h = next
 	}
 	return h
 }
@@ -101,10 +142,38 @@ func (c *Client) QuestionDetail(ctx context.Context, slug string) (Question, err
 
 	if metaErr == nil && meta.Arity() > 0 {
 		if cases, err := testcase.FromLeetCodeExample(q.ExampleTestcases, meta.Arity()); err == nil {
+			// exampleTestcases is inputs only; the expected outputs live in the
+			// statement prose ("Output: 3"). Attach them when the count lines up
+			// exactly, so the local judge can actually verify the examples.
+			if outs := parseExampleOutputs(q.Content); len(outs) == len(cases) {
+				for i := range cases {
+					cases[i].Out = outs[i]
+				}
+			}
 			out.ExampleCases = cases
 		}
 	}
 	return out, nil
+}
+
+// exampleOutputRe pulls the literal after an "Output:" label out of a LeetCode
+// statement, tolerating both the old <pre> markup ("<strong>Output:</strong> 3")
+// and the newer example-block markup ("...</strong> <span ...>3</span>").
+var exampleOutputRe = regexp.MustCompile(`(?i)Output:\s*(?:</strong>)?\s*(?:<[^>]+>\s*)?([^<\n]+)`)
+
+// parseExampleOutputs returns the expected-output literals from a statement, in
+// document order.
+func parseExampleOutputs(statementHTML string) []string {
+	ms := exampleOutputRe.FindAllStringSubmatch(statementHTML, -1)
+	outs := make([]string, 0, len(ms))
+	for _, m := range ms {
+		v := strings.TrimSpace(html.UnescapeString(m[1]))
+		if v == "" {
+			return nil // ambiguous — better to attach nothing
+		}
+		outs = append(outs, v)
+	}
+	return outs
 }
 
 // rawMeta mirrors LeetCode's metaData JSON string for the function-style form.

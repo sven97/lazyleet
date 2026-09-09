@@ -1,10 +1,57 @@
 package leetcode
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"strconv"
 	"time"
 )
+
+// flexStrings decodes a field LeetCode sends as either a JSON array of strings
+// (interpret / Run Code) or a bare string, often "" (submission check).
+type flexStrings []string
+
+func (f *flexStrings) UnmarshalJSON(b []byte) error {
+	b = bytes.TrimSpace(b)
+	if len(b) == 0 || string(b) == "null" {
+		return nil
+	}
+	if b[0] == '"' {
+		var s string
+		if err := json.Unmarshal(b, &s); err != nil {
+			return err
+		}
+		if s != "" {
+			*f = flexStrings{s}
+		}
+		return nil
+	}
+	var ss []string
+	if err := json.Unmarshal(b, &ss); err != nil {
+		return err
+	}
+	*f = ss
+	return nil
+}
+
+// flexInt decodes an int that LeetCode may send as a number, a quoted number,
+// or null.
+type flexInt int
+
+func (f *flexInt) UnmarshalJSON(b []byte) error {
+	b = bytes.TrimSpace(bytes.Trim(b, `"`))
+	if len(b) == 0 || string(b) == "null" {
+		return nil
+	}
+	n, err := strconv.Atoi(string(b))
+	if err != nil {
+		return err
+	}
+	*f = flexInt(n)
+	return nil
+}
 
 // These endpoints require authentication. They are the client half of Phase 6;
 // the workspace UI wires them later.
@@ -39,6 +86,48 @@ type JudgeResult struct {
 	CodeOutput        []string `json:"code_output"`
 	FullCompileError  string   `json:"full_compile_error"`
 	FullRuntimeError  string   `json:"full_runtime_error"`
+}
+
+// UnmarshalJSON tolerates LeetCode's shifting types: code_answer /
+// expected_code_answer / code_output arrive as a []string from interpret but as
+// a bare (often empty) string from a submission check; total_correct /
+// total_testcases occasionally arrive quoted or null.
+func (r *JudgeResult) UnmarshalJSON(b []byte) error {
+	type alias struct {
+		State             string      `json:"state"`
+		StatusMsg         string      `json:"status_msg"`
+		RunSuccess        bool        `json:"run_success"`
+		CorrectAnswer     bool        `json:"correct_answer"`
+		TotalCorrect      flexInt     `json:"total_correct"`
+		TotalTestcases    flexInt     `json:"total_testcases"`
+		StatusRuntime     string      `json:"status_runtime"`
+		StatusMemory      string      `json:"status_memory"`
+		RuntimePercentile float64     `json:"runtime_percentile"`
+		MemoryPercentile  float64     `json:"memory_percentile"`
+		CodeAnswer        flexStrings `json:"code_answer"`
+		ExpectedAnswer    flexStrings `json:"expected_code_answer"`
+		CompareResult     string      `json:"compare_result"`
+		LastTestcase      string      `json:"last_testcase"`
+		CodeOutput        flexStrings `json:"code_output"`
+		FullCompileError  string      `json:"full_compile_error"`
+		FullRuntimeError  string      `json:"full_runtime_error"`
+	}
+	var a alias
+	if err := json.Unmarshal(b, &a); err != nil {
+		return err
+	}
+	*r = JudgeResult{
+		State: a.State, StatusMsg: a.StatusMsg, RunSuccess: a.RunSuccess,
+		CorrectAnswer: a.CorrectAnswer,
+		TotalCorrect:  int(a.TotalCorrect), TotalTestcases: int(a.TotalTestcases),
+		StatusRuntime: a.StatusRuntime, StatusMemory: a.StatusMemory,
+		RuntimePercentile: a.RuntimePercentile, MemoryPercentile: a.MemoryPercentile,
+		CodeAnswer: a.CodeAnswer, ExpectedAnswer: a.ExpectedAnswer,
+		CompareResult: a.CompareResult, LastTestcase: a.LastTestcase,
+		CodeOutput:       a.CodeOutput,
+		FullCompileError: a.FullCompileError, FullRuntimeError: a.FullRuntimeError,
+	}
+	return nil
 }
 
 // Accepted reports whether a submission passed.
