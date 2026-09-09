@@ -83,7 +83,7 @@ func (m *BrowseModel) sourcesBody(w int) string {
 	var b strings.Builder
 	b.WriteString(m.th.Muted.Render("PROBLEMS") + "\n")
 	for i, s := range m.sources {
-		if i == 1 {
+		if i == 2 {
 			b.WriteString("\n" + m.th.Muted.Render("STUDY PLANS") + "\n")
 		}
 		line := s.label
@@ -130,7 +130,30 @@ func (m *BrowseModel) statusPaneBody(w int) string {
 		}
 		line2 = m.th.Muted.Render(truncate(txt, w))
 	}
-	return line1 + "\n" + line2
+	return line1 + "\n" + line2 + "\n" + m.dailyStatusLine(w)
+}
+
+// dailyStatusLine is the one-line "daily · done/not-done · streak N" summary.
+func (m *BrowseModel) dailyStatusLine(w int) string {
+	if m.dailyErr != nil {
+		return m.th.Muted.Render(truncate("daily · unavailable", w))
+	}
+	if !m.dailyLoaded || m.daily.Slug == "" {
+		return m.th.Muted.Render("daily · …")
+	}
+	mark := m.th.Muted.Render("○")
+	state := "not done"
+	if m.daily.Done {
+		mark, state = m.th.Pass.Render("✓"), "done"
+	}
+	txt := "daily · " + state
+	if m.daily.Difficulty != "" {
+		txt += " · " + strings.ToLower(m.daily.Difficulty)
+	}
+	if m.daily.Streak > 0 {
+		txt += fmt.Sprintf(" · streak %d", m.daily.Streak)
+	}
+	return mark + " " + m.th.Muted.Render(truncate(txt, w-2))
 }
 
 // statusDetailBody is the expanded info shown in the Detail pane while the
@@ -161,6 +184,33 @@ func (m *BrowseModel) statusDetailBody() string {
 	if m.auth.CacheDB != "" {
 		b.WriteString("  database    " + m.th.Muted.Render(m.auth.CacheDB) + "\n")
 	}
+
+	b.WriteString("\n" + m.th.Title.Render("Daily Challenge") + "\n")
+	switch {
+	case m.dailyErr != nil:
+		b.WriteString("  " + m.th.Muted.Render("unavailable — "+m.dailyErr.Error()) + "\n")
+	case !m.dailyLoaded || m.daily.Slug == "":
+		b.WriteString("  " + m.th.Muted.Render("loading…") + "\n")
+	default:
+		if m.daily.Date != "" {
+			b.WriteString("  date        " + m.daily.Date + "\n")
+		}
+		title := m.daily.Title
+		if m.daily.Difficulty != "" {
+			title += " (" + m.daily.Difficulty + ")"
+		}
+		b.WriteString("  today       " + title + "\n")
+		if m.daily.Done {
+			b.WriteString("  status      " + m.th.Pass.Render("done") + "\n")
+		} else {
+			b.WriteString("  status      " + m.th.Muted.Render("not done") + "\n")
+		}
+		if m.auth.Authed {
+			b.WriteString(fmt.Sprintf("  streak      %d day(s)\n", m.daily.Streak))
+		} else {
+			b.WriteString("  streak      " + m.th.Muted.Render("sign in to track") + "\n")
+		}
+	}
 	return b.String()
 }
 
@@ -173,10 +223,19 @@ func firstNonEmptyStr(a, b string) string {
 
 func (m *BrowseModel) listTitle() string {
 	var base string
-	if m.activeSrc > 0 && m.activeSrc < len(m.sources) && m.sources[m.activeSrc].kind == srcPlan {
+	switch m.activeSourceKind() {
+	case srcPlan:
 		solved, total := m.planProgress()
 		base = fmt.Sprintf("%s  %d/%d solved", m.sources[m.activeSrc].label, solved, total)
-	} else {
+	case srcDaily:
+		base = "Daily Question"
+		if m.daily.Date != "" {
+			base += "  " + m.daily.Date
+		}
+		if m.daily.Done {
+			base += "  " + m.th.Pass.Render("✓ done")
+		}
+	default:
 		base = fmt.Sprintf("Problems  (%d)", len(m.filtered))
 	}
 	if s := m.filterSummary(); s != "" {
@@ -207,8 +266,8 @@ func (m *BrowseModel) listRowsBody(w, rows int) string {
 		if m.loadErr != nil {
 			return m.th.ErrorText.Render("failed to load problems: ") + m.loadErr.Error()
 		}
-		if p := m.loadingPlanLabel(); p != "" {
-			return m.th.Muted.Render("loading " + p + "…")
+		if r := m.emptyListReason(); r != "" {
+			return m.th.Muted.Render(r)
 		}
 		return m.th.Muted.Render("no problems cached — press s to sync from LeetCode")
 	}

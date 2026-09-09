@@ -406,6 +406,19 @@ done; submission history panel deferred. `internal/tui` + `cmd/lazyleet`.
 
 Append newest entries at the top. One entry per working session or milestone.
 
+- **2026-09-08 (q)** — Daily challenge in browse. New `srcDaily` source
+  ("Daily Question", sits under PROBLEMS between All Problems and the study
+  plans) — selecting it filters the list to just today's question (catalog row
+  preferred so ✓/AC%/tags carry through, else synthesised from `DailyInfo`).
+  Status pane grew a 3rd line — `daily · done|not done · <diff> · streak N` —
+  and the expanded Status/Detail view gets a "Daily Challenge" block (date,
+  title, status, streak). `internal/leetcode/daily.go`:
+  `DailyQuestion` (`activeDailyCodingChallengeQuestion`) + `DailyStreak`
+  (`streakCounter`, auth-only, nil-safe). `BrowseData.Daily`
+  → `DailyInfo{Date,Slug,Title,Difficulty,Done,Streak}`, fetched in `Init`'s
+  batch. `brStatusH` 5→6; `sourceRowAt` / `sourcesBody` / `rebuildView` updated
+  for the extra fixed source (`activeSourceKind` helper; `srcAll=0 srcDaily=1
+  srcPlan=2`).
 - **2026-09-08 (p)** — Lightweight progress sync. Splitting "refresh the whole
   catalog" from "refresh my solve status". New `fetchAndCacheProgress` pulls the
   server-filtered `problemsetQuestionList` for `status:"AC"` and `"TRIED"` (a

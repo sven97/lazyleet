@@ -90,16 +90,25 @@ func TestBrowseWheelOverListScrollsWithoutMovingCursor(t *testing.T) {
 
 func TestBrowseClickSourceActivatesIt(t *testing.T) {
 	m, f := bootBrowse(t)
-	// sources body: line1 = source[0] "All Problems", line4 = source[1] "Starter"
-	y := m.layout.Sources.Y + 2 + 4
 	x := m.layout.Sources.X + 3
+	// body lines: 0 PROBLEMS, 1 All, 2 Daily, 3 blank, 4 STUDY PLANS, 5 Starter
 	step(&m, planSlugsMsg{slug: "starter", slugs: f.planMap["starter"]})
-	step(&m, press(x, y))
-	if m.activeSrc != 1 {
+	step(&m, press(x, m.layout.Sources.Y+2+5))
+	if m.activeSrc != 2 {
 		t.Fatalf("clicking the plan row should activate it, activeSrc=%d", m.activeSrc)
 	}
 	if len(m.view) != 2 || m.view[0].Slug != "valid-parentheses" {
 		t.Fatalf("plan not applied: %+v", m.view)
+	}
+
+	// clicking the Daily Question row applies it: list shows just today's problem
+	step(&m, dailyLoadedMsg{info: f.daily})
+	step(&m, press(x, m.layout.Sources.Y+2+2))
+	if m.activeSourceKind() != srcDaily {
+		t.Fatalf("clicking Daily should activate it, kind=%d", m.activeSourceKind())
+	}
+	if len(m.view) != 1 || m.view[0].Slug != "valid-parentheses" {
+		t.Fatalf("daily not applied: %+v", m.view)
 	}
 }
 

@@ -18,6 +18,7 @@ import (
 
 const (
 	srcAll = iota
+	srcDaily
 	srcPlan
 )
 
@@ -83,6 +84,10 @@ type BrowseModel struct {
 
 	auth AuthState
 
+	daily       DailyInfo
+	dailyErr    error
+	dailyLoaded bool
+
 	spin        spinner.Model
 	syncing     bool
 	autoSynced  bool // guards the one-shot progress sync on browse open
@@ -139,18 +144,33 @@ func NewBrowseModel(data BrowseData) *BrowseModel {
 		spin:        sp,
 		planCache:   map[string][]string{},
 		renderCache: map[string]previewEntry{},
-		sources:     []sourceItem{{label: "All Problems", kind: srcAll}},
+		sources: []sourceItem{
+			{label: "All Problems", kind: srcAll},
+			{label: "Daily Question", kind: srcDaily},
+		},
 	}
 }
 
 func (m *BrowseModel) Init() tea.Cmd {
-	return tea.Batch(m.spin.Tick, m.loadProblems(), m.loadPlans(), m.loadAuth())
+	return tea.Batch(m.spin.Tick, m.loadProblems(), m.loadPlans(), m.loadAuth(), m.loadDaily())
 }
 
 type authLoadedMsg struct{ a AuthState }
 
 func (m *BrowseModel) loadAuth() tea.Cmd {
 	return func() tea.Msg { return authLoadedMsg{a: m.data.Auth(context.Background())} }
+}
+
+type dailyLoadedMsg struct {
+	info DailyInfo
+	err  error
+}
+
+func (m *BrowseModel) loadDaily() tea.Cmd {
+	return func() tea.Msg {
+		info, err := m.data.Daily(context.Background())
+		return dailyLoadedMsg{info: info, err: err}
+	}
 }
 
 // --- commands --------------------------------------------------------------
@@ -262,8 +282,20 @@ func (m *BrowseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.auth = msg.a
 		return m, m.maybeSyncProgress()
 
+	case dailyLoadedMsg:
+		m.dailyLoaded = true
+		m.dailyErr = msg.err
+		if msg.err == nil {
+			m.daily = msg.info
+		}
+		if m.activeSourceKind() == srcDaily {
+			m.rebuildView()
+			return m, m.debouncePreview()
+		}
+		return m, nil
+
 	case plansLoadedMsg:
-		m.sources = m.sources[:1] // keep "All Problems"
+		m.sources = m.sources[:2] // keep "All Problems" + "Daily Question"
 		for _, p := range msg.plans {
 			m.sources = append(m.sources, sourceItem{label: p.Name, kind: srcPlan, plan: p})
 		}
@@ -392,6 +424,8 @@ func (m *BrowseModel) sourceRowAt(my int) int {
 	if len(m.sources) == 0 {
 		return -1
 	}
+	// Body layout: 0 "PROBLEMS", 1 All Problems, 2 Daily Question, 3 blank,
+	// 4 "STUDY PLANS", 5 plan[0], 6 plan[1], … → plan[k] at line 3+k (k>=2).
 	body := my - (m.layout.Sources.Y + 2) // border + title
 	if body < 0 {
 		return -1
@@ -400,8 +434,10 @@ func (m *BrowseModel) sourceRowAt(my int) int {
 	switch {
 	case body <= 1: // "PROBLEMS" header or the All-Problems row
 		idx = 0
-	case body <= 4: // blank / "STUDY PLANS" header / first plan row
+	case body == 2: // Daily Question
 		idx = 1
+	case body <= 5: // blank / "STUDY PLANS" header / first plan row
+		idx = 2
 	default:
 		idx = body - 3
 	}
@@ -587,8 +623,8 @@ func (m *BrowseModel) handleSourcesKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// activateSource applies the source at idx (All Problems, or a study plan),
-// rebuilds the list, and moves focus there.
+// activateSource applies the source at idx (All Problems, the Daily Question, or
+// a study plan), rebuilds the list, and moves focus there.
 func (m *BrowseModel) activateSource(idx int) tea.Cmd {
 	if idx < 0 || idx >= len(m.sources) {
 		return nil
@@ -596,14 +632,42 @@ func (m *BrowseModel) activateSource(idx int) tea.Cmd {
 	m.activeSrc = idx
 	src := m.sources[idx]
 	var cmd tea.Cmd
-	if src.kind == srcPlan {
+	switch src.kind {
+	case srcPlan:
 		if _, ok := m.planCache[src.plan.Slug]; !ok {
 			cmd = m.loadPlanSlugs(src.plan)
+		}
+	case srcDaily:
+		if !m.dailyLoaded {
+			cmd = m.loadDaily()
 		}
 	}
 	m.rebuildView()
 	m.focus = RegionList
 	return tea.Batch(cmd, m.debouncePreview())
+}
+
+// activeSourceKind is the kind of the currently-applied source.
+func (m *BrowseModel) activeSourceKind() int {
+	if m.activeSrc < 0 || m.activeSrc >= len(m.sources) {
+		return srcAll
+	}
+	return m.sources[m.activeSrc].kind
+}
+
+// dailyRow returns the problem row for today's daily challenge, preferring the
+// catalog row (carries solve status, AC%, tags) and falling back to a row
+// synthesised from DailyInfo when the catalog doesn't have it.
+func (m *BrowseModel) dailyRow() (BrowseRow, bool) {
+	if m.daily.Slug == "" {
+		return BrowseRow{}, false
+	}
+	for _, r := range m.allRows {
+		if r.Slug == m.daily.Slug {
+			return r, true
+		}
+	}
+	return BrowseRow{Slug: m.daily.Slug, Title: m.daily.Title, Difficulty: m.daily.Difficulty}, true
 }
 
 func (m *BrowseModel) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -662,9 +726,13 @@ func (m *BrowseModel) activeSourceIsPlan(slug string) bool {
 }
 
 func (m *BrowseModel) rebuildView() {
-	if m.activeSrc <= 0 || m.activeSrc >= len(m.sources) || m.sources[m.activeSrc].kind == srcAll {
-		m.view = m.allRows
-	} else {
+	switch m.activeSourceKind() {
+	case srcDaily:
+		m.view = m.view[:0]
+		if r, ok := m.dailyRow(); ok {
+			m.view = append(m.view, r)
+		}
+	case srcPlan:
 		ref := m.sources[m.activeSrc].plan
 		slugs := m.planCache[ref.Slug]
 		byslug := make(map[string]BrowseRow, len(m.allRows))
@@ -679,6 +747,8 @@ func (m *BrowseModel) rebuildView() {
 				m.view = append(m.view, BrowseRow{Slug: s, Title: s, Difficulty: "?"})
 			}
 		}
+	default: // srcAll
+		m.view = m.allRows
 	}
 	m.view = applyListFilterSort(m.view, m.listFilterState(), m.sortMode)
 
@@ -781,20 +851,26 @@ func (m *BrowseModel) scrollList(delta int) {
 // header, one line per source, and a blank + "STUDY PLANS" header.
 func (m *BrowseModel) sourcesRows() int { return len(m.sources) + 3 }
 
-// loadingPlanLabel returns the label of the active study plan while its slug
-// list is still being fetched, else "".
-func (m *BrowseModel) loadingPlanLabel() string {
-	if m.activeSrc <= 0 || m.activeSrc >= len(m.sources) {
+// emptyListReason explains an empty problem list for the active source while
+// its data is still loading (or failed), else "".
+func (m *BrowseModel) emptyListReason() string {
+	if m.activeSrc < 0 || m.activeSrc >= len(m.sources) {
 		return ""
 	}
-	src := m.sources[m.activeSrc]
-	if src.kind != srcPlan {
-		return ""
+	switch src := m.sources[m.activeSrc]; src.kind {
+	case srcPlan:
+		if _, ok := m.planCache[src.plan.Slug]; !ok {
+			return "loading " + src.label + "…"
+		}
+	case srcDaily:
+		if m.dailyErr != nil {
+			return "today's daily challenge is unavailable"
+		}
+		if !m.dailyLoaded || m.daily.Slug == "" {
+			return "loading today's daily challenge…"
+		}
 	}
-	if _, ok := m.planCache[src.plan.Slug]; ok {
-		return ""
-	}
-	return src.label
+	return ""
 }
 
 func (m *BrowseModel) relayout() {

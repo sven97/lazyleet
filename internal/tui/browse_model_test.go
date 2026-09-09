@@ -20,6 +20,9 @@ type fakeBrowseData struct {
 	authed         bool
 	progressCalls  int
 	progressSolved int
+	daily          DailyInfo
+	dailyErr       error
+	dailyCalls     int
 }
 
 func (f *fakeBrowseData) ListProblems(context.Context) ([]BrowseRow, error) { return f.rows, nil }
@@ -41,6 +44,10 @@ func (f *fakeBrowseData) Plans(context.Context) ([]PlanRef, error) { return f.pl
 func (f *fakeBrowseData) PlanSlugs(_ context.Context, ref PlanRef) ([]string, error) {
 	return f.planMap[ref.Slug], nil
 }
+func (f *fakeBrowseData) Daily(context.Context) (DailyInfo, error) {
+	f.dailyCalls++
+	return f.daily, f.dailyErr
+}
 
 func newFakeData() *fakeBrowseData {
 	return &fakeBrowseData{
@@ -52,6 +59,10 @@ func newFakeData() *fakeBrowseData {
 		plans:   []PlanRef{{Slug: "starter", Name: "Starter", Official: false}},
 		planMap: map[string][]string{"starter": {"valid-parentheses", "two-sum"}},
 		stmts:   map[string]string{"two-sum": "# Two Sum\n\nGiven an array.", "valid-parentheses": "# Valid Parentheses"},
+		daily: DailyInfo{
+			Date: "2026-09-08", Slug: "valid-parentheses", Title: "Valid Parentheses",
+			Difficulty: "Easy", Done: false, Streak: 3,
+		},
 	}
 }
 
@@ -62,6 +73,7 @@ func bootBrowse(t *testing.T) (*BrowseModel, *fakeBrowseData) {
 	step(&m, tea.WindowSizeMsg{Width: 150, Height: 40})
 	step(&m, browseLoadedMsg{rows: f.rows})
 	step(&m, plansLoadedMsg{plans: f.plans})
+	step(&m, dailyLoadedMsg{info: f.daily})
 	return m, f
 }
 
@@ -142,6 +154,7 @@ func TestBrowseSelectPlanReordersAndCounts(t *testing.T) {
 	if m.focus != RegionSources {
 		t.Fatalf("focus = %v, want Sources", m.focus)
 	}
+	step(&m, tea.KeyMsg{Type: tea.KeyDown}) // past "Daily Question"
 	step(&m, tea.KeyMsg{Type: tea.KeyDown}) // to "Starter"
 	step(&m, planSlugsMsg{slug: "starter", slugs: f.planMap["starter"]})
 	step(&m, tea.KeyMsg{Type: tea.KeyEnter})
@@ -325,5 +338,55 @@ func TestBrowseSkipsProgressSyncWhenAnonymous(t *testing.T) {
 	step(&m, authLoadedMsg{a: AuthState{Authed: false}})
 	if f.progressCalls != 0 {
 		t.Fatalf("anonymous session must not sync progress, got %d calls", f.progressCalls)
+	}
+}
+
+func TestBrowseDailySourceShowsOnlyTodaysQuestion(t *testing.T) {
+	m, _ := bootBrowse(t) // sources: All(0) Daily(1) Starter(2)
+	if m.sources[1].kind != srcDaily {
+		t.Fatalf("expected a Daily Question source at index 1, got kind %d", m.sources[1].kind)
+	}
+	drain(&m, m.activateSource(1))
+	if m.activeSourceKind() != srcDaily {
+		t.Fatalf("activeSourceKind = %d, want srcDaily", m.activeSourceKind())
+	}
+	if len(m.view) != 1 || m.view[0].Slug != "valid-parentheses" {
+		t.Fatalf("daily list = %+v, want just today's question", m.view)
+	}
+	// the catalog row is preferred, so real metadata comes through
+	if m.view[0].Title != "Valid Parentheses" {
+		t.Fatalf("daily row title = %q", m.view[0].Title)
+	}
+}
+
+func TestBrowseStatusShowsDailyStreak(t *testing.T) {
+	m, _ := bootBrowse(t)
+	v := m.View()
+	if !strings.Contains(v, "daily") || !strings.Contains(v, "streak 3") {
+		t.Fatalf("status pane should show the daily streak:\n%s", v)
+	}
+
+	// completing it flips the marker
+	step(&m, dailyLoadedMsg{info: DailyInfo{
+		Date: "2026-09-08", Slug: "valid-parentheses", Title: "Valid Parentheses",
+		Difficulty: "Easy", Done: true, Streak: 4,
+	}})
+	if !strings.Contains(m.dailyStatusLine(40), "done") {
+		t.Fatalf("daily line should read done: %q", m.dailyStatusLine(40))
+	}
+}
+
+func TestBrowseDailyUnavailableIsSurfaced(t *testing.T) {
+	f := newFakeData()
+	f.dailyErr = context.DeadlineExceeded
+	m := NewBrowseModel(f)
+	step(&m, tea.WindowSizeMsg{Width: 150, Height: 40})
+	step(&m, browseLoadedMsg{rows: f.rows})
+	step(&m, plansLoadedMsg{plans: f.plans})
+	step(&m, dailyLoadedMsg{info: DailyInfo{}, err: f.dailyErr})
+
+	drain(&m, m.activateSource(1))
+	if got := m.emptyListReason(); !strings.Contains(got, "unavailable") {
+		t.Fatalf("emptyListReason = %q, want an 'unavailable' message", got)
 	}
 }

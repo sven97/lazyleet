@@ -63,7 +63,7 @@ const (
 	brLeftMin     = 28
 	brLeftMax     = 56
 	brRightMin    = 30
-	brStatusH     = 5 // border(2) + title(1) + 2 body lines
+	brStatusH     = 6 // border(2) + title(1) + 3 body lines (auth · cache · daily)
 	brSourcesMaxH = 14
 	brListMinH    = 5
 	brMinTwoColW  = brLeftMin + brRightMin + 2

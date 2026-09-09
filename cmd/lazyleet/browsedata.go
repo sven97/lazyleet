@@ -99,6 +99,33 @@ func (b *browseData) SyncProgress(ctx context.Context) (int, error) {
 	return fetchAndCacheProgress(ctx, client, b.db)
 }
 
+func (b *browseData) Daily(ctx context.Context) (tui.DailyInfo, error) {
+	client, err := b.app.newClient()
+	if err != nil {
+		return tui.DailyInfo{}, err
+	}
+	dc, err := client.DailyQuestion(ctx)
+	if err != nil {
+		return tui.DailyInfo{}, err
+	}
+	info := tui.DailyInfo{
+		Date:       dc.Date,
+		Slug:       dc.Slug,
+		Title:      dc.Question.Title,
+		Difficulty: dc.Question.Difficulty,
+		Done:       dc.Done(),
+	}
+	if creds, _ := b.app.loadCredentials(); !creds.Anonymous() {
+		if st, err := client.DailyStreak(ctx); err == nil {
+			info.Streak = st.Count
+			if st.CurrentDayDone {
+				info.Done = true
+			}
+		}
+	}
+	return info, nil
+}
+
 func (b *browseData) LoadStatement(ctx context.Context, slug string) (string, error) {
 	if q, ok := leetcode.Fixture(slug); ok {
 		return q.Statement, nil

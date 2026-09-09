@@ -27,6 +27,18 @@ type PlanRef struct {
 	Official bool // true = fetched from LeetCode, false = bundled
 }
 
+// DailyInfo is today's LeetCode daily challenge plus the signed-in user's
+// streak. Streak is 0 when anonymous or unknown; Done covers both "solved
+// today" and the streak's current-day-completed flag.
+type DailyInfo struct {
+	Date       string // YYYY-MM-DD
+	Slug       string
+	Title      string
+	Difficulty string
+	Done       bool
+	Streak     int
+}
+
 // AuthState is the auth/config summary shown in the Status pane.
 type AuthState struct {
 	Authed   bool
@@ -58,4 +70,6 @@ type BrowseData interface {
 	Plans(ctx context.Context) ([]PlanRef, error)
 	// PlanSlugs returns the ordered problem slugs for a plan.
 	PlanSlugs(ctx context.Context, ref PlanRef) ([]string, error)
+	// Daily returns today's daily challenge and the user's streak.
+	Daily(ctx context.Context) (DailyInfo, error)
 }
