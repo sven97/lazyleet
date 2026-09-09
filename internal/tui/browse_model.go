@@ -83,11 +83,12 @@ type BrowseModel struct {
 
 	auth AuthState
 
-	spin      spinner.Model
-	syncing   bool
-	statusMsg string
-	loadErr   error
-	lastSync  time.Time
+	spin       spinner.Model
+	syncing    bool
+	autoSynced bool // guards the one-shot progress sync on browse open
+	statusMsg  string
+	loadErr    error
+	lastSync   time.Time
 
 	// Chosen is the slug the user opened, set just before tea.Quit.
 	Chosen string
@@ -189,6 +190,32 @@ func (m *BrowseModel) syncCmd() tea.Cmd {
 	}
 }
 
+// maybeAutoSync fires a one-shot background sync when signed in so the browse
+// list reflects the user's real solve history. It runs when the cache has no
+// per-user status yet (last sync was anonymous) or is more than 6h stale. It
+// needs both the auth state and the problem rows loaded, so it is called from
+// both the browseLoadedMsg and authLoadedMsg handlers.
+func (m *BrowseModel) maybeAutoSync() tea.Cmd {
+	if m.autoSynced || m.syncing || !m.auth.Authed || len(m.allRows) == 0 {
+		return nil
+	}
+	hasStatus := false
+	for _, r := range m.allRows {
+		if r.Status != "" {
+			hasStatus = true
+			break
+		}
+	}
+	stale := m.lastSync.IsZero() || time.Since(m.lastSync) > 6*time.Hour
+	if hasStatus && !stale {
+		return nil
+	}
+	m.autoSynced = true
+	m.syncing = true
+	m.statusMsg = "syncing your progress…"
+	return tea.Batch(m.syncCmd(), m.spin.Tick)
+}
+
 func (m *BrowseModel) debouncePreview() tea.Cmd {
 	slug := m.currentSlug()
 	if slug == "" {
@@ -228,11 +255,11 @@ func (m *BrowseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.lastSync = msg.lastSync
 		}
 		m.rebuildView()
-		return m, m.debouncePreview()
+		return m, tea.Batch(m.debouncePreview(), m.maybeAutoSync())
 
 	case authLoadedMsg:
 		m.auth = msg.a
-		return m, nil
+		return m, m.maybeAutoSync()
 
 	case plansLoadedMsg:
 		m.sources = m.sources[:1] // keep "All Problems"
@@ -243,9 +270,11 @@ func (m *BrowseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.refreshDetail()
 
 	case planSlugsMsg:
-		if msg.err == nil {
-			m.planCache[msg.slug] = msg.slugs
+		if msg.err != nil {
+			m.statusMsg = "plan load failed: " + msg.err.Error()
+			return m, nil
 		}
+		m.planCache[msg.slug] = msg.slugs
 		if m.activeSourceIsPlan(msg.slug) {
 			m.rebuildView()
 			return m, m.debouncePreview()
@@ -345,22 +374,31 @@ func (m *BrowseModel) listRowAt(my int) int {
 	return idx
 }
 
-// sourceRowAt maps a terminal row to a source index, or -1. Body layout:
-// line0 "PROBLEMS", line1 source[0], line2 blank, line3 "STUDY PLANS",
-// line4 source[1], line5 source[2], …
+// sourceRowAt maps a click Y to a source index. The Sources body interleaves
+// two header lines and a blank among the rows, so any click inside the pane
+// snaps to the nearest source — a click anywhere on a source is a selection,
+// same as the problem list.
 func (m *BrowseModel) sourceRowAt(my int) int {
-	body := my - (m.layout.Sources.Y + 2) // border + title
-	switch {
-	case body == 1:
-		if len(m.sources) > 0 {
-			return 0
-		}
-	case body >= 4:
-		if idx := body - 3; idx < len(m.sources) {
-			return idx
-		}
+	if len(m.sources) == 0 {
+		return -1
 	}
-	return -1
+	body := my - (m.layout.Sources.Y + 2) // border + title
+	if body < 0 {
+		return -1
+	}
+	var idx int
+	switch {
+	case body <= 1: // "PROBLEMS" header or the All-Problems row
+		idx = 0
+	case body <= 4: // blank / "STUDY PLANS" header / first plan row
+		idx = 1
+	default:
+		idx = body - 3
+	}
+	if idx >= len(m.sources) {
+		idx = len(m.sources) - 1
+	}
+	return idx
 }
 
 func (m *BrowseModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
@@ -376,15 +414,10 @@ func (m *BrowseModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		up := msg.Button == tea.MouseButtonWheelUp
 		switch reg {
 		case RegionList:
-			prev := m.cursor
 			if up {
-				m.cursor -= 2
+				m.scrollList(-3)
 			} else {
-				m.cursor += 2
-			}
-			m.clampCursor()
-			if m.cursor != prev {
-				return m, m.debouncePreview()
+				m.scrollList(3)
 			}
 		case RegionSources:
 			if up && m.srcCursor > 0 {
@@ -708,16 +741,51 @@ func (m *BrowseModel) currentRow() (BrowseRow, bool) {
 }
 
 func (m *BrowseModel) listRows() int {
-	h := m.layout.List.H - 2 - 1 // border + header
+	// The frame eats border(2) + title(1); the list body prints its own
+	// column-header line. What's left is data rows.
+	h := m.layout.List.H - 3 - 1
 	if h < 1 {
 		return 1
 	}
 	return h
 }
 
+// scrollList moves the list viewport by delta rows without touching the
+// selection — mouse-wheel scrolling browses the list, arrow keys move the
+// cursor. The cursor is allowed to scroll out of view.
+func (m *BrowseModel) scrollList(delta int) {
+	maxTop := len(m.filtered) - m.listRows()
+	if maxTop < 0 {
+		maxTop = 0
+	}
+	m.top += delta
+	if m.top > maxTop {
+		m.top = maxTop
+	}
+	if m.top < 0 {
+		m.top = 0
+	}
+}
+
 // sourcesRows is how many body lines the Sources pane needs: a "PROBLEMS"
 // header, one line per source, and a blank + "STUDY PLANS" header.
 func (m *BrowseModel) sourcesRows() int { return len(m.sources) + 3 }
+
+// loadingPlanLabel returns the label of the active study plan while its slug
+// list is still being fetched, else "".
+func (m *BrowseModel) loadingPlanLabel() string {
+	if m.activeSrc <= 0 || m.activeSrc >= len(m.sources) {
+		return ""
+	}
+	src := m.sources[m.activeSrc]
+	if src.kind != srcPlan {
+		return ""
+	}
+	if _, ok := m.planCache[src.plan.Slug]; ok {
+		return ""
+	}
+	return src.label
+}
 
 func (m *BrowseModel) relayout() {
 	if m.width == 0 || m.height == 0 {

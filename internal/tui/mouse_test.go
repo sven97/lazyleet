@@ -63,16 +63,28 @@ func TestBrowseClickListRowSelectsThenOpens(t *testing.T) {
 	}
 }
 
-func TestBrowseWheelOverListMovesCursor(t *testing.T) {
+func TestBrowseWheelOverListScrollsWithoutMovingCursor(t *testing.T) {
 	m, _ := bootBrowse(t)
+	// Shrink the terminal so the 3-row fixture list can't fit in its pane.
+	step(&m, tea.WindowSizeMsg{Width: 150, Height: 16})
+	if m.listRows() >= len(m.filtered) {
+		t.Fatalf("test needs an overflowing list: listRows=%d filtered=%d", m.listRows(), len(m.filtered))
+	}
 	cx, cy := m.layout.List.X+3, m.layout.List.Y+m.layout.List.H/2
+
 	step(&m, wheel(cx, cy, false)) // down
-	if m.cursor == 0 {
-		t.Fatalf("wheel-down over the list should advance the cursor")
+	if m.top == 0 {
+		t.Fatalf("wheel-down over the list should scroll the list (m.top)")
+	}
+	if m.cursor != 0 {
+		t.Fatalf("wheel must not move the selection, cursor=%d", m.cursor)
 	}
 	step(&m, wheel(cx, cy, true)) // up
+	if m.top != 0 {
+		t.Fatalf("wheel-up should scroll back to the top, got m.top=%d", m.top)
+	}
 	if m.cursor != 0 {
-		t.Fatalf("wheel-up should bring the cursor back, got %d", m.cursor)
+		t.Fatalf("wheel must not move the selection, cursor=%d", m.cursor)
 	}
 }
 

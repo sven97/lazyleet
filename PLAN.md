@@ -376,9 +376,10 @@ done; submission history panel deferred. `internal/tui` + `cmd/lazyleet`.
 
 - [ ] Themes / color schemes; ASCII border + light-terminal fallbacks.
 - [x] Mouse: click-to-focus panes, click-to-select list rows (double-click
-      opens), click a source to activate it, wheel scrolls the pane under the
-      cursor. Hit-testing via `Rect.Contains` + `regionAt`/`paneAt`. Drag-range
-      selection not done.
+      opens), click anywhere in the Sources pane to activate the nearest source,
+      wheel scrolls the pane under the cursor (the problem list scrolls its
+      viewport without moving the selection). Hit-testing via `Rect.Contains` +
+      `regionAt`/`paneAt`. Drag-range selection not done.
 - [ ] First-run wizard (auth, default language, editor).
 - [ ] Auth-expired and offline banners.
 - [ ] `leetcode.cn` region support.
@@ -405,6 +406,24 @@ done; submission history panel deferred. `internal/tui` + `cmd/lazyleet`.
 
 Append newest entries at the top. One entry per working session or milestone.
 
+- **2026-09-08 (o)** — Browse fixes from user testing. (1) **Long list broke the
+  layout**: `listRows()` was off by one (frame eats border+title, body adds its
+  own column header → data rows = `List.H - 4`, was `- 3`), so a full list
+  rendered one line past its pane and pushed the whole left column up a row,
+  clipping the Status border off the top. `frame()` now also hard-clips with
+  `MaxWidth(r.W).MaxHeight(r.H)` so no body can ever overflow its pane. (2)
+  **Wheel over the list moved the selection** → now `scrollList(±3)` moves the
+  viewport (`m.top`) only, clamped, cursor untouched. (3) **Source click felt
+  different from problem click**: `sourceRowAt` returned -1 for the header/blank
+  lines interleaved among source rows, so an off-by-a-line click only changed
+  focus → now snaps to the nearest source (any click in the pane selects one).
+  Uncached study plan now shows "loading <plan>…" instead of a blank list, and
+  `planSlugsMsg` errors surface in the status bar. (4) **Solve history wasn't
+  showing**: browse never re-synced, so a cache built while anonymous had no
+  per-user `status`. Added `maybeAutoSync` — a one-shot background sync on
+  browse open when signed in and the cache has no status yet or is >6h stale
+  (fires from both `browseLoadedMsg` and `authLoadedMsg`, guarded by
+  `autoSynced`).
 - **2026-09-08 (n)** — Mouse: click + wheel. `Rect.Contains(x,y)` + per-model
   hit-testing (`BrowseModel.regionAt` / `WorkspaceModel.paneAt`). Click focuses
   the pane under the cursor; in browse, clicking a list row selects it (a second

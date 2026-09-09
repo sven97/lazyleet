@@ -73,7 +73,10 @@ func (m *BrowseModel) frame(title string, focused bool, r Rect, body string) str
 		ts, bs = m.th.TitleFocused, m.th.PaneBorderFocused
 	}
 	inner := lipgloss.JoinVertical(lipgloss.Left, ts.Render(title), body)
-	return bs.Width(r.W - 2).Height(r.H - 2).Render(inner)
+	// MaxWidth/MaxHeight hard-clip: a body that renders taller than its pane
+	// must never push the neighbouring panes off-screen.
+	return bs.Width(r.W - 2).Height(r.H - 2).
+		MaxWidth(r.W).MaxHeight(r.H).Render(inner)
 }
 
 func (m *BrowseModel) sourcesBody(w int) string {
@@ -203,6 +206,9 @@ func (m *BrowseModel) listRowsBody(w, rows int) string {
 	if len(m.view) == 0 {
 		if m.loadErr != nil {
 			return m.th.ErrorText.Render("failed to load problems: ") + m.loadErr.Error()
+		}
+		if p := m.loadingPlanLabel(); p != "" {
+			return m.th.Muted.Render("loading " + p + "…")
 		}
 		return m.th.Muted.Render("no problems cached — press s to sync from LeetCode")
 	}
