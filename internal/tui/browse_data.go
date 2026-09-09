@@ -27,11 +27,22 @@ type PlanRef struct {
 	Official bool // true = fetched from LeetCode, false = bundled
 }
 
+// AuthState is the auth/config summary shown in the Status pane.
+type AuthState struct {
+	Authed   bool
+	User     string // "" unless known
+	Region   string
+	AuthFile string
+	CacheDB  string
+}
+
 // BrowseData is everything browse mode needs from the outside world. The cmd
 // layer implements it over store + leetcode + plans; tests use a fake.
 type BrowseData interface {
 	// ListProblems returns the full cached problem list (may be empty).
 	ListProblems(ctx context.Context) ([]BrowseRow, error)
+	// Auth returns the current auth/config summary (no network).
+	Auth(ctx context.Context) AuthState
 	// LastSync reports when the problem cache was last refreshed.
 	LastSync(ctx context.Context) (t time.Time, ok bool)
 	// Sync refreshes the cache from LeetCode and returns the problem count.

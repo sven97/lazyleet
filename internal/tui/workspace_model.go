@@ -578,12 +578,14 @@ func (m *WorkspaceModel) View() string {
 	if m.layout.Tabbed {
 		body = m.renderPane(m.focused, m.layout.RectFor(m.focused), true)
 	} else {
-		cols := lipgloss.JoinHorizontal(lipgloss.Top,
-			m.renderPane(PaneStatement, m.layout.Statement, m.focused == PaneStatement),
+		right := lipgloss.JoinVertical(lipgloss.Left,
 			m.renderPane(PaneCode, m.layout.Code, m.focused == PaneCode),
 			m.renderPane(PaneResults, m.layout.Results, m.focused == PaneResults),
 		)
-		body = cols
+		body = lipgloss.JoinHorizontal(lipgloss.Top,
+			m.renderPane(PaneStatement, m.layout.Statement, m.focused == PaneStatement),
+			right,
+		)
 	}
 	return lipgloss.JoinVertical(lipgloss.Left, body, m.renderStatusBar())
 }

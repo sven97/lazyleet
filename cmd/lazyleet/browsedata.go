@@ -35,6 +35,16 @@ func newBrowseData(app *appContext) (*browseData, error) {
 
 func (b *browseData) Close() error { return b.db.Close() }
 
+func (b *browseData) Auth(ctx context.Context) tui.AuthState {
+	creds, _ := b.app.loadCredentials()
+	return tui.AuthState{
+		Authed:   !creds.Anonymous(),
+		Region:   string(b.app.cfg.Region),
+		AuthFile: b.app.paths.AuthFile,
+		CacheDB:  b.app.paths.DatabaseFile,
+	}
+}
+
 func (b *browseData) ListProblems(ctx context.Context) ([]tui.BrowseRow, error) {
 	rows, err := b.db.ListProblems(ctx, store.ProblemFilter{})
 	if err != nil {

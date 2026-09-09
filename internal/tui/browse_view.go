@@ -17,39 +17,46 @@ func (m *BrowseModel) View() string {
 	}
 
 	var body string
-	if m.zoom {
-		body = m.frame(m.focus.String(), true, fullRect(m.width, m.layout.Status), m.regionBody(m.focus, m.width-2, m.zoomInnerH()))
+	if m.layout.Single {
+		r := m.layout.RectFor(m.focus)
+		body = m.frame(m.regionTitle(m.focus), true, r, m.regionBody(m.focus, innerW(r)))
 	} else {
-		var cols []string
-		if m.layout.ShowSidebar {
-			cols = append(cols, m.frame("Sources", m.focus == RegionSidebar, m.layout.Sidebar,
-				m.sidebarBody(innerW(m.layout.Sidebar))))
-		}
-		cols = append(cols, m.frame(m.listTitle(), m.focus == RegionList, m.layout.List,
-			m.listBody(innerW(m.layout.List))))
-		if m.layout.ShowPreview {
-			cols = append(cols, m.frame(m.previewTitle(), m.focus == RegionPreview, m.layout.Preview,
-				m.previewBody()))
-		}
-		body = lipgloss.JoinHorizontal(lipgloss.Top, cols...)
+		left := lipgloss.JoinVertical(lipgloss.Left,
+			m.frame("Status", m.focus == RegionStatus, m.layout.Status,
+				m.statusPaneBody(innerW(m.layout.Status))),
+			m.frame("Sources", m.focus == RegionSources, m.layout.Sources,
+				m.sourcesBody(innerW(m.layout.Sources))),
+			m.frame(m.listTitle(), m.focus == RegionList, m.layout.List,
+				m.listBody(innerW(m.layout.List))),
+		)
+		right := m.frame(m.regionTitle(RegionDetail), m.focus == RegionDetail, m.layout.Detail, m.detailBody())
+		body = lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 	}
 	return lipgloss.JoinVertical(lipgloss.Left, body, m.renderStatusBar())
 }
 
-func (m *BrowseModel) zoomInnerH() int {
-	h := m.height - statusBarHeight - 2 - 1
-	if h < 1 {
-		h = 1
+func (m *BrowseModel) regionTitle(r Region) string {
+	switch r {
+	case RegionStatus:
+		return "Status"
+	case RegionSources:
+		return "Sources"
+	case RegionList:
+		return m.listTitle()
+	case RegionDetail:
+		return m.detailTitle()
 	}
-	return h
+	return r.String()
 }
 
-func (m *BrowseModel) regionBody(r Region, w, _ int) string {
+func (m *BrowseModel) regionBody(r Region, w int) string {
 	switch r {
-	case RegionSidebar:
-		return m.sidebarBody(w)
-	case RegionPreview:
-		return m.previewBody()
+	case RegionStatus:
+		return m.statusPaneBody(w)
+	case RegionSources:
+		return m.sourcesBody(w)
+	case RegionDetail:
+		return m.detailBody()
 	default:
 		return m.listBody(w)
 	}
@@ -69,7 +76,7 @@ func (m *BrowseModel) frame(title string, focused bool, r Rect, body string) str
 	return bs.Width(r.W - 2).Height(r.H - 2).Render(inner)
 }
 
-func (m *BrowseModel) sidebarBody(w int) string {
+func (m *BrowseModel) sourcesBody(w int) string {
 	var b strings.Builder
 	b.WriteString(m.th.Muted.Render("PROBLEMS") + "\n")
 	for i, s := range m.sources {
@@ -83,12 +90,82 @@ func (m *BrowseModel) sidebarBody(w int) string {
 			line = "  " + line
 		}
 		line = truncate(line, w)
-		if i == m.srcCursor && m.focus == RegionSidebar {
+		if i == m.srcCursor && m.focus == RegionSources {
 			line = lipgloss.NewStyle().Reverse(true).Render(padRight(line, w))
 		}
-		b.WriteString(line + "\n")
+		b.WriteString(line)
+		if i < len(m.sources)-1 {
+			b.WriteByte('\n')
+		}
 	}
 	return b.String()
+}
+
+// statusPaneBody is the compact 2-line summary shown in the small left-top pane
+// (its rect is brStatusH tall: border + title + 2 lines).
+func (m *BrowseModel) statusPaneBody(w int) string {
+	region := firstNonEmptyStr(m.auth.Region, "com")
+
+	var line1 string
+	if m.auth.Authed {
+		who := "signed in"
+		if m.auth.User != "" {
+			who = m.auth.User
+		}
+		line1 = m.th.Pass.Render("✓ ") + truncate(who+"  ·  "+region, w-2)
+	} else {
+		line1 = m.th.Muted.Render(truncate("· anonymous  ·  "+region, w))
+	}
+
+	var line2 string
+	if len(m.allRows) == 0 {
+		line2 = m.th.ErrorText.Render("cache empty — press s to sync")
+	} else {
+		txt := fmt.Sprintf("%d problems", len(m.allRows))
+		if !m.lastSync.IsZero() {
+			txt += " · synced " + roughAge(time.Since(m.lastSync)) + " ago"
+		}
+		line2 = m.th.Muted.Render(truncate(txt, w))
+	}
+	return line1 + "\n" + line2
+}
+
+// statusDetailBody is the expanded info shown in the Detail pane while the
+// Status pane is focused.
+func (m *BrowseModel) statusDetailBody() string {
+	var b strings.Builder
+	b.WriteString(m.th.Title.Render("Authentication") + "\n")
+	if m.auth.Authed {
+		who := "yes"
+		if m.auth.User != "" {
+			who = m.auth.User
+		}
+		b.WriteString("  signed in   " + who + "\n")
+	} else {
+		b.WriteString("  signed in   " + m.th.Muted.Render("no — run `lazyleet auth`") + "\n")
+	}
+	b.WriteString("  region      " + firstNonEmptyStr(m.auth.Region, "com") + "\n")
+	if m.auth.AuthFile != "" {
+		b.WriteString("  auth file   " + m.th.Muted.Render(m.auth.AuthFile) + "\n")
+	}
+	b.WriteString("\n" + m.th.Title.Render("Cache") + "\n")
+	b.WriteString(fmt.Sprintf("  problems    %d\n", len(m.allRows)))
+	if m.lastSync.IsZero() {
+		b.WriteString("  synced      " + m.th.Muted.Render("never — press s") + "\n")
+	} else {
+		b.WriteString("  synced      " + roughAge(time.Since(m.lastSync)) + " ago\n")
+	}
+	if m.auth.CacheDB != "" {
+		b.WriteString("  database    " + m.th.Muted.Render(m.auth.CacheDB) + "\n")
+	}
+	return b.String()
+}
+
+func firstNonEmptyStr(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
 }
 
 func (m *BrowseModel) listTitle() string {
@@ -185,17 +262,23 @@ func (m *BrowseModel) formatRow(r BrowseRow, w int) string {
 	return prefix + truncate(title, avail)
 }
 
-func (m *BrowseModel) previewTitle() string {
+func (m *BrowseModel) detailTitle() string {
+	if m.focus == RegionStatus {
+		return "Status detail"
+	}
 	if m.previewTab == 1 {
 		return "Topics"
 	}
 	if r, ok := m.currentRow(); ok {
 		return fmt.Sprintf("%d. %s", r.FrontendID, r.Title)
 	}
-	return "Preview"
+	return "Detail"
 }
 
-func (m *BrowseModel) previewBody() string {
+func (m *BrowseModel) detailBody() string {
+	if m.focus == RegionStatus {
+		return m.previewVP.View() // holds statusDetailBody, set by refreshDetail
+	}
 	if m.previewTab == 1 {
 		return m.previewVP.View() // topics — derived from the row, always current
 	}
@@ -213,7 +296,7 @@ func (m *BrowseModel) previewBody() string {
 }
 
 func (m *BrowseModel) renderStatusBar() string {
-	if m.layout.Status.Empty() {
+	if m.layout.Footer.Empty() {
 		return ""
 	}
 	w := m.width
@@ -269,17 +352,6 @@ func innerW(r Rect) int {
 		return 1
 	}
 	return w
-}
-
-func fullRect(w int, status Rect) Rect {
-	h := status.Y
-	if status.Empty() {
-		h = 0
-	}
-	if h <= 0 {
-		h = 1
-	}
-	return Rect{X: 0, Y: 0, W: w, H: h}
 }
 
 func padRight(s string, w int) string {

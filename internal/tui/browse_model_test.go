@@ -19,6 +19,9 @@ type fakeBrowseData struct {
 }
 
 func (f *fakeBrowseData) ListProblems(context.Context) ([]BrowseRow, error) { return f.rows, nil }
+func (f *fakeBrowseData) Auth(context.Context) AuthState {
+	return AuthState{Authed: false, Region: "com"}
+}
 func (f *fakeBrowseData) LastSync(context.Context) (time.Time, bool) {
 	return time.Now().Add(-2 * time.Hour), true
 }
@@ -126,11 +129,10 @@ func TestBrowseFuzzyFilter(t *testing.T) {
 
 func TestBrowseSelectPlanReordersAndCounts(t *testing.T) {
 	m, f := bootBrowse(t)
-	// focus sidebar, move to the plan, open it
-	step(&m, tea.KeyMsg{Type: tea.KeyTab}) // list -> preview
-	step(&m, tea.KeyMsg{Type: tea.KeyTab}) // preview -> sidebar
-	if m.focus != RegionSidebar {
-		t.Fatalf("focus = %v, want sidebar", m.focus)
+	// focus the Sources pane (list -> sources is one shift+tab), move to the plan, open it
+	step(&m, tea.KeyMsg{Type: tea.KeyShiftTab})
+	if m.focus != RegionSources {
+		t.Fatalf("focus = %v, want Sources", m.focus)
 	}
 	step(&m, tea.KeyMsg{Type: tea.KeyDown}) // to "Starter"
 	step(&m, planSlugsMsg{slug: "starter", slugs: f.planMap["starter"]})
@@ -191,8 +193,8 @@ func TestBrowsePreviewShowsLoadingUntilCurrentRendered(t *testing.T) {
 	m, _ := bootBrowse(t)
 
 	// fresh: nothing rendered for the selected row yet
-	if !strings.Contains(m.previewBody(), "loading") {
-		t.Fatalf("expected a loading state before any statement is rendered:\n%s", m.previewBody())
+	if !strings.Contains(m.detailBody(), "loading") {
+		t.Fatalf("expected a loading state before any statement is rendered:\n%s", m.detailBody())
 	}
 
 	// deliver + render the statement for the current row
@@ -204,14 +206,14 @@ func TestBrowsePreviewShowsLoadingUntilCurrentRendered(t *testing.T) {
 	if m.previewContentSlug != "two-sum" {
 		t.Fatalf("previewContentSlug = %q, want two-sum", m.previewContentSlug)
 	}
-	if strings.Contains(m.previewBody(), "loading") {
-		t.Fatalf("current statement rendered; should not show loading:\n%s", m.previewBody())
+	if strings.Contains(m.detailBody(), "loading") {
+		t.Fatalf("current statement rendered; should not show loading:\n%s", m.detailBody())
 	}
 
 	// navigate to another row — preview must not keep showing the old one
 	step(&m, tea.KeyMsg{Type: tea.KeyDown})
-	if !strings.Contains(m.previewBody(), "loading") {
-		t.Fatalf("after moving to an unrendered row, expected loading, got:\n%s", m.previewBody())
+	if !strings.Contains(m.detailBody(), "loading") {
+		t.Fatalf("after moving to an unrendered row, expected loading, got:\n%s", m.detailBody())
 	}
 }
 

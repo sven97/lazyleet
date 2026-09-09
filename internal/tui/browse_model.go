@@ -81,6 +81,8 @@ type BrowseModel struct {
 	imgWriter  *ImageWriter
 	imgWritten string
 
+	auth AuthState
+
 	spin      spinner.Model
 	syncing   bool
 	statusMsg string
@@ -136,7 +138,13 @@ func NewBrowseModel(data BrowseData) *BrowseModel {
 }
 
 func (m *BrowseModel) Init() tea.Cmd {
-	return tea.Batch(m.spin.Tick, m.loadProblems(), m.loadPlans())
+	return tea.Batch(m.spin.Tick, m.loadProblems(), m.loadPlans(), m.loadAuth())
+}
+
+type authLoadedMsg struct{ a AuthState }
+
+func (m *BrowseModel) loadAuth() tea.Cmd {
+	return func() tea.Msg { return authLoadedMsg{a: m.data.Auth(context.Background())} }
 }
 
 // --- commands --------------------------------------------------------------
@@ -203,7 +211,7 @@ func (m *BrowseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.previewVP.Width != prevW {
 			m.renderCache = map[string]previewEntry{}
 		}
-		return m, m.refreshPreviewContent()
+		return m, m.refreshDetail()
 
 	case spinner.TickMsg:
 		var cmd tea.Cmd
@@ -222,12 +230,17 @@ func (m *BrowseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.rebuildView()
 		return m, m.debouncePreview()
 
+	case authLoadedMsg:
+		m.auth = msg.a
+		return m, nil
+
 	case plansLoadedMsg:
 		m.sources = m.sources[:1] // keep "All Problems"
 		for _, p := range msg.plans {
 			m.sources = append(m.sources, sourceItem{label: p.Name, kind: srcPlan, plan: p})
 		}
-		return m, nil
+		m.relayout() // the Sources pane is sized to the source count
+		return m, m.refreshDetail()
 
 	case planSlugsMsg:
 		if msg.err == nil {
@@ -264,18 +277,18 @@ func (m *BrowseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.previewMD = msg.md
-		return m, tea.Batch(m.refreshPreviewContent(), m.loadPreviewImagesCmd(msg.slug, msg.md))
+		return m, tea.Batch(m.refreshDetail(), m.loadPreviewImagesCmd(msg.slug, msg.md))
 
 	case previewImagesMsg:
 		if msg.slug != m.previewSlug || len(msg.byURL) == 0 {
 			return m, nil
 		}
 		m.previewImages = &statementImages{proto: m.imgProto, byURL: msg.byURL}
-		return m, m.refreshPreviewContent()
+		return m, m.refreshDetail()
 
 	case previewRenderedMsg:
 		m.renderCache[msg.key] = previewEntry{content: msg.content, prefix: msg.prefix}
-		if msg.key == m.previewKey() {
+		if msg.key == m.previewKey() && m.focus != RegionStatus {
 			m.previewVP.SetContent(msg.content)
 			m.previewVP.GotoTop()
 			m.previewContentSlug = m.previewSlug
@@ -339,14 +352,14 @@ func (m *BrowseModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.Zoom):
 		m.zoom = !m.zoom
 		m.relayout()
-		return m, m.refreshPreviewContent()
+		return m, m.refreshDetail()
 
 	case key.Matches(msg, m.keys.NextPane):
-		m.focus = m.focus.next(m.layout.ShowSidebar, m.layout.ShowPreview)
-		return m, nil
+		m.focus = m.focus.next()
+		return m, m.refreshDetail()
 	case key.Matches(msg, m.keys.PrevPane):
-		m.focus = m.focus.prev(m.layout.ShowSidebar, m.layout.ShowPreview)
-		return m, nil
+		m.focus = m.focus.prev()
+		return m, m.refreshDetail()
 
 	case key.Matches(msg, m.keys.Filter):
 		if m.focus == RegionList {
@@ -355,8 +368,11 @@ func (m *BrowseModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	case key.Matches(msg, m.keys.PreviewTab):
+		if m.focus == RegionStatus {
+			return m, nil
+		}
 		m.previewTab = (m.previewTab + 1) % 2
-		return m, m.refreshPreviewContent()
+		return m, m.refreshDetail()
 
 	case key.Matches(msg, m.keys.FilterDiff):
 		m.fltDiff = cycleDifficulty(m.fltDiff)
@@ -379,16 +395,18 @@ func (m *BrowseModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	switch m.focus {
-	case RegionSidebar:
-		return m.handleSidebarKey(msg)
-	case RegionPreview:
-		return m.handlePreviewKey(msg)
+	case RegionStatus:
+		return m, nil // the Status pane is static; focusing it shows detail info
+	case RegionSources:
+		return m.handleSourcesKey(msg)
+	case RegionDetail:
+		return m.handleDetailKey(msg)
 	default:
 		return m.handleListKey(msg)
 	}
 }
 
-func (m *BrowseModel) handleSidebarKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *BrowseModel) handleSourcesKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, m.keys.Up):
 		if m.srcCursor > 0 {
@@ -445,7 +463,7 @@ func (m *BrowseModel) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *BrowseModel) handlePreviewKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *BrowseModel) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, m.keys.Up):
 		m.previewVP.ScrollUp(2)
@@ -566,14 +584,18 @@ func (m *BrowseModel) listRows() int {
 	return h
 }
 
+// sourcesRows is how many body lines the Sources pane needs: a "PROBLEMS"
+// header, one line per source, and a blank + "STUDY PLANS" header.
+func (m *BrowseModel) sourcesRows() int { return len(m.sources) + 3 }
+
 func (m *BrowseModel) relayout() {
 	if m.width == 0 || m.height == 0 {
 		return
 	}
-	m.layout = ComputeBrowse(m.width, m.height, m.focus, m.zoom)
+	m.layout = ComputeBrowse(m.width, m.height, m.focus, m.zoom, m.sourcesRows())
 	m.focus = m.layout.Focused
 
-	pw, ph := innerSize(m.layout.Preview)
+	pw, ph := innerSize(m.layout.Detail)
 	if m.previewVP.Width == 0 && m.previewVP.Height == 0 {
 		m.previewVP = viewport.New(pw, ph)
 		m.previewVP.MouseWheelEnabled = true
@@ -582,6 +604,17 @@ func (m *BrowseModel) relayout() {
 	}
 	m.filter.Width = m.layout.List.W - 6
 	m.clampCursor()
+}
+
+// refreshDetail updates the right-hand pane for the current focus: the Status
+// pane's expanded info when it is focused, otherwise the problem statement.
+func (m *BrowseModel) refreshDetail() tea.Cmd {
+	if m.focus == RegionStatus {
+		m.previewVP.SetContent(m.statusDetailBody())
+		m.previewVP.GotoTop()
+		return nil
+	}
+	return m.refreshPreviewContent()
 }
 
 // EnableImages turns on inline preview images. iw must be the same ImageWriter

@@ -1,74 +1,77 @@
 package tui
 
-// Region identifies a browse-mode pane.
+// Region identifies a browse-mode pane. The left column stacks Status, Sources
+// and List top-to-bottom; the right column is a single Detail pane.
 type Region int
 
 const (
-	RegionSidebar Region = iota
+	RegionStatus Region = iota
+	RegionSources
 	RegionList
-	RegionPreview
+	RegionDetail
 	regionCount
 )
 
 func (r Region) String() string {
 	switch r {
-	case RegionSidebar:
+	case RegionStatus:
+		return "Status"
+	case RegionSources:
 		return "Sources"
 	case RegionList:
 		return "Problems"
-	case RegionPreview:
-		return "Preview"
+	case RegionDetail:
+		return "Detail"
 	default:
 		return "?"
 	}
 }
 
-// next / prev cycle only through the regions currently visible.
-func (r Region) next(showSidebar, showPreview bool) Region {
-	for i := 0; i < int(regionCount); i++ {
-		r = (r + 1) % regionCount
-		if (r != RegionSidebar || showSidebar) && (r != RegionPreview || showPreview) {
-			return r
-		}
-	}
-	return r
-}
-
-func (r Region) prev(showSidebar, showPreview bool) Region {
-	for i := 0; i < int(regionCount); i++ {
-		r = (r + regionCount - 1) % regionCount
-		if (r != RegionSidebar || showSidebar) && (r != RegionPreview || showPreview) {
-			return r
-		}
-	}
-	return r
-}
+func (r Region) next() Region { return (r + 1) % regionCount }
+func (r Region) prev() Region { return (r + regionCount - 1) % regionCount }
 
 // BrowseLayout is the solved geometry for browse mode.
 type BrowseLayout struct {
-	Sidebar Rect
-	List    Rect
-	Preview Rect
-	Status  Rect
+	Status  Rect // left column, top — auth / cache summary
+	Sources Rect // left column, middle — All Problems + study plans
+	List    Rect // left column, bottom — the problem list
+	Detail  Rect // right column — statement, or status detail
 
-	ShowSidebar bool
-	ShowPreview bool
-	Focused     Region
+	Footer  Rect // one-row shortcut bar along the bottom
+	Focused Region
+	Single  bool // narrow terminal or zoom: render only the focused pane
 }
 
-// browse layout thresholds
+// RectFor returns the rectangle for a region.
+func (l BrowseLayout) RectFor(r Region) Rect {
+	switch r {
+	case RegionStatus:
+		return l.Status
+	case RegionSources:
+		return l.Sources
+	case RegionList:
+		return l.List
+	case RegionDetail:
+		return l.Detail
+	default:
+		return Rect{}
+	}
+}
+
 const (
-	sidebarMin       = 18
-	sidebarMax       = 30
-	listMin          = 34
-	previewMin       = 40
-	dropPreviewBelow = listMin + previewMin // total width under this loses the preview
-	dropSidebarBelow = listMin + 6
+	brLeftPct     = 38 // left column width, % of terminal width
+	brLeftMin     = 28
+	brLeftMax     = 56
+	brRightMin    = 30
+	brStatusH     = 5 // border(2) + title(1) + 2 body lines
+	brSourcesMaxH = 14
+	brListMinH    = 5
+	brMinTwoColW  = brLeftMin + brRightMin + 2
 )
 
-// ComputeBrowse solves the browse-mode layout. Pure function of size, focus,
-// and zoom.
-func ComputeBrowse(termW, termH int, focused Region, zoom bool) BrowseLayout {
+// ComputeBrowse solves the browse-mode layout. sourcesRows is how many rows the
+// Sources pane wants for its content (used to size that pane). Pure function.
+func ComputeBrowse(termW, termH int, focused Region, zoom bool, sourcesRows int) BrowseLayout {
 	if termW < 1 {
 		termW = 1
 	}
@@ -76,65 +79,68 @@ func ComputeBrowse(termW, termH int, focused Region, zoom bool) BrowseLayout {
 		termH = 1
 	}
 
-	l := BrowseLayout{Focused: focused, ShowSidebar: true, ShowPreview: true}
+	l := BrowseLayout{Focused: focused}
 
 	workH := termH - statusBarHeight
 	if workH < minWorkingHeight {
 		workH = termH
-		l.Status = Rect{}
+		l.Footer = Rect{}
 	} else {
-		l.Status = Rect{X: 0, Y: workH, W: termW, H: statusBarHeight}
+		l.Footer = Rect{X: 0, Y: workH, W: termW, H: statusBarHeight}
 	}
+	work := Rect{X: 0, Y: 0, W: termW, H: workH}
 
-	if zoom {
-		full := Rect{X: 0, Y: 0, W: termW, H: workH}
-		l.Sidebar, l.List, l.Preview = full, full, full
-		// keep Show* true so region cycling still works; caller renders Focused
+	if zoom || termW < brMinTwoColW || workH < brStatusH+8 {
+		l.Single = true
+		l.Status, l.Sources, l.List, l.Detail = work, work, work, work
 		return l
 	}
 
-	// Decide which optional panes fit.
-	if termW < dropPreviewBelow {
-		l.ShowPreview = false
+	leftW := termW * brLeftPct / 100
+	if leftW < brLeftMin {
+		leftW = brLeftMin
 	}
-	if termW < dropSidebarBelow {
-		l.ShowSidebar = false
+	if leftW > brLeftMax {
+		leftW = brLeftMax
 	}
-	if focused == RegionPreview && !l.ShowPreview {
-		l.Focused = RegionList
+	if termW-leftW < brRightMin {
+		leftW = termW - brRightMin
 	}
-	if focused == RegionSidebar && !l.ShowSidebar {
-		l.Focused = RegionList
+	rightW := termW - leftW
+
+	const srcMinH = 6 // title + border + at least 3 body lines
+
+	statusH := brStatusH
+	srcH := sourcesRows + 3 // + title + border
+	if srcH > brSourcesMaxH {
+		srcH = brSourcesMaxH
+	}
+	if srcH < srcMinH {
+		srcH = srcMinH
 	}
 
-	x := 0
-	rem := termW
-
-	if l.ShowSidebar {
-		sw := termW / 5
-		if sw < sidebarMin {
-			sw = sidebarMin
+	// Guarantee the list a usable height, shrinking Sources then Status.
+	if listH := workH - statusH - srcH; listH < brListMinH {
+		deficit := brListMinH - listH
+		if take := min(deficit, srcH-srcMinH); take > 0 {
+			srcH -= take
+			deficit -= take
 		}
-		if sw > sidebarMax {
-			sw = sidebarMax
+		if deficit > 0 {
+			statusH -= deficit
+			if statusH < 3 {
+				statusH = 3
+			}
 		}
-		l.Sidebar = Rect{X: 0, Y: 0, W: sw, H: workH}
-		x += sw
-		rem -= sw
+	}
+	listH := workH - statusH - srcH
+	if listH < 1 {
+		listH = 1
 	}
 
-	if l.ShowPreview {
-		pw := rem * 2 / 5
-		if pw < previewMin {
-			pw = previewMin
-		}
-		if rem-pw < listMin {
-			pw = rem - listMin
-		}
-		l.List = Rect{X: x, Y: 0, W: rem - pw, H: workH}
-		l.Preview = Rect{X: x + (rem - pw), Y: 0, W: pw, H: workH}
-	} else {
-		l.List = Rect{X: x, Y: 0, W: rem, H: workH}
-	}
+	l.Status = Rect{X: 0, Y: 0, W: leftW, H: statusH}
+	l.Sources = Rect{X: 0, Y: statusH, W: leftW, H: srcH}
+	l.List = Rect{X: 0, Y: statusH + srcH, W: leftW, H: listH}
+	l.Detail = Rect{X: leftW, Y: 0, W: rightW, H: workH}
 	return l
 }

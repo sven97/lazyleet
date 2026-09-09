@@ -2,23 +2,30 @@ package tui
 
 import "testing"
 
-func TestComputeThreeColumnWidthsSumAndMinimums(t *testing.T) {
-	for _, termW := range []int{minThreeColWidth, 80, 100, 120, 200, 240} {
+func TestComputeTwoColumnGeometry(t *testing.T) {
+	for _, termW := range []int{wsMinTwoColW, 80, 100, 120, 200, 240} {
 		l := Compute(termW, 40, PaneCode, ModeNormal)
 		if l.Tabbed {
 			t.Fatalf("termW=%d: unexpected tabbed layout", termW)
 		}
-		sum := l.Statement.W + l.Code.W + l.Results.W
-		if sum != termW {
-			t.Errorf("termW=%d: column widths sum to %d", termW, sum)
+		// Statement is the whole left column; Code+Results split the right column.
+		if l.Statement.X != 0 || l.Statement.Y != 0 {
+			t.Errorf("termW=%d: statement not top-left: %+v", termW, l.Statement)
 		}
-		for _, r := range []Rect{l.Statement, l.Code, l.Results} {
-			if r.W < minPaneWidth {
-				t.Errorf("termW=%d: pane width %d < min %d", termW, r.W, minPaneWidth)
-			}
+		if l.Code.X != l.Statement.W || l.Results.X != l.Statement.W {
+			t.Errorf("termW=%d: right column X mismatch: %+v", termW, l)
 		}
-		if l.Statement.X != 0 || l.Code.X != l.Statement.W || l.Results.X != l.Statement.W+l.Code.W {
-			t.Errorf("termW=%d: panes not laid left-to-right: %+v", termW, l)
+		if l.Statement.W+l.Code.W != termW {
+			t.Errorf("termW=%d: columns don't sum to width: %d+%d", termW, l.Statement.W, l.Code.W)
+		}
+		if l.Code.W != l.Results.W {
+			t.Errorf("termW=%d: code/results widths differ: %d vs %d", termW, l.Code.W, l.Results.W)
+		}
+		if l.Results.Y != l.Code.H || l.Code.H+l.Results.H != l.Statement.H {
+			t.Errorf("termW=%d: right column heights don't stack: %+v", termW, l)
+		}
+		if l.Statement.W < wsMinColWidth || l.Code.W < wsMinColWidth {
+			t.Errorf("termW=%d: a column is under the minimum width", termW)
 		}
 	}
 }
@@ -28,13 +35,13 @@ func TestComputeReservesStatusBar(t *testing.T) {
 	if l.Status.Y != 39 || l.Status.W != 120 || l.Status.H != 1 {
 		t.Errorf("status bar = %+v, want {Y:39 W:120 H:1}", l.Status)
 	}
-	if l.Code.H != 39 {
-		t.Errorf("pane height = %d, want 39 (termH - status bar)", l.Code.H)
+	if l.Statement.H != 39 {
+		t.Errorf("statement height = %d, want 39 (termH - status bar)", l.Statement.H)
 	}
 }
 
 func TestComputeNarrowFallsBackToTabbed(t *testing.T) {
-	l := Compute(minThreeColWidth-1, 40, PaneStatement, ModeNormal)
+	l := Compute(wsMinTwoColW-1, 40, PaneStatement, ModeNormal)
 	if !l.Tabbed {
 		t.Fatal("narrow terminal should use the tabbed layout")
 	}

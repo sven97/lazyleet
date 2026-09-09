@@ -10,7 +10,7 @@ local test running and one-key submit — in the user's own editor.
 > **Plan Changes**. Keep companion research in `lazygit-ui-research.md` and
 > `leetcode-product-analysis.md`.
 
-Last updated: 2026-09-08 (statement wrap fix + inline images in browse preview)
+Last updated: 2026-09-08 (two-column layouts for both modes)
 
 ---
 
@@ -232,11 +232,12 @@ run/submit are client-only (Phase 6 wires them). `internal/leetcode`.
 `lazyleet` (no args) launches it. `internal/tui/browse_*.go`,
 `cmd/lazyleet/browse*.go`.
 
-- [x] Layout engine: pure `ComputeBrowse(termW, termH, focused, zoom)` — sidebar
-      (weighted, 18–30 cols) · list · preview (drops preview then sidebar as
-      width shrinks), 1-row status bar, `z` zoom to focused pane.
-- [x] Panes: sources sidebar (All Problems + bundled + official study plans) ·
-      problem list · statement preview · generated shortcut bar.
+- [x] Layout engine: pure `ComputeBrowse` — **two columns**: left stacks
+      Status · Sources · List; right is one Detail pane. Narrow → single pane,
+      `z` zoom to focused. 1-row shortcut bar.
+- [x] Panes: Status (auth/region/sync) · Sources (All Problems + bundled +
+      official study plans) · problem list · Detail (statement, or Status info
+      when Status is focused) · generated shortcut bar.
 - [x] Problem list: status glyph (✓/~/·), frontend id, difficulty letter
       (color-coded), acceptance %, title (🔒 for paid). Cursor index separate
       from scroll `top`; `g`/`G`, `ctrl+u`/`ctrl+d`.
@@ -292,7 +293,8 @@ driven by `leetcode.Fixture` instead of the API. `internal/workspace`.
 **Status: In progress** — Tier C vertical slice works against the fixture via
 `lazyleet solve two-sum`. `internal/tui`.
 
-- [x] Tier C layout: Statement (glamour) · Code mirror (chroma, read-only,
+- [x] Layout: **two columns** — left Statement (full height), right stacks
+      Code · Results. Statement (glamour) · Code mirror (chroma, read-only,
       line-gutter) · Results, side by side. Pure layout solver
       (`tui.Compute`) with weights, min-width fallback to tabbed, and a
       `ModeZoom` that fills the focused pane. Bordered panes, focus highlight.
@@ -401,6 +403,16 @@ done; submission history panel deferred. `internal/tui` + `cmd/lazyleet`.
 
 Append newest entries at the top. One entry per working session or milestone.
 
+- **2026-09-08 (m)** — Two-column layouts (user redesign). **Browse**: left
+  column stacks Status (auth/region/sync summary) · Sources (All Problems +
+  study plans) · List; right column is one Detail pane (statement, or the
+  expanded Status info when the Status pane is focused). Regions:
+  `RegionStatus/Sources/List/Detail`. New `BrowseData.Auth()` (sync, no
+  network) + `AuthState`. **Workspace**: left = Statement (full height); right
+  column stacks Code · Results. `Compute`/`ComputeBrowse` rewritten (2-col,
+  weighted, narrow→single-pane, `z` zoom preserved). `plansLoadedMsg` now
+  relayouts (Sources pane height tracks the source count). Layout tests
+  rewritten; render dumps confirm column bottoms align.
 - **2026-09-08 (l)** — Navigation-freeze while loading, take 2. The async
   preview render built its glamour renderer per-render with
   `glamour.WithAutoStyle()`, which **probes the terminal background (OSC query)
