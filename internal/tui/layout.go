@@ -41,6 +41,11 @@ type Rect struct{ X, Y, W, H int }
 // Empty reports whether the rect has no area.
 func (r Rect) Empty() bool { return r.W <= 0 || r.H <= 0 }
 
+// Contains reports whether the 0-indexed cell (x, y) lies inside the rect.
+func (r Rect) Contains(x, y int) bool {
+	return x >= r.X && x < r.X+r.W && y >= r.Y && y < r.Y+r.H
+}
+
 // Layout is the solved workspace layout: Statement fills the left column;
 // Code (top) and Results (bottom) split the right column.
 type Layout struct {

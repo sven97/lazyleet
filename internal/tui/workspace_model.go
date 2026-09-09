@@ -331,10 +331,7 @@ func (m *WorkspaceModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleKey(msg)
 
 	case tea.MouseMsg:
-		vp := m.focusedViewport()
-		var cmd tea.Cmd
-		*vp, cmd = vp.Update(msg)
-		return m, cmd
+		return m.handleMouse(msg)
 
 	case fileChangedMsg:
 		return m.handleFileChange()
@@ -464,8 +461,10 @@ func (m *WorkspaceModel) handleFileChange() (tea.Model, tea.Cmd) {
 
 // --- rendering ---------------------------------------------------------------
 
-func (m *WorkspaceModel) focusedViewport() *viewport.Model {
-	switch m.focused {
+func (m *WorkspaceModel) focusedViewport() *viewport.Model { return m.paneViewport(m.focused) }
+
+func (m *WorkspaceModel) paneViewport(p Pane) *viewport.Model {
+	switch p {
 	case PaneStatement:
 		return &m.statement
 	case PaneResults:
@@ -473,6 +472,41 @@ func (m *WorkspaceModel) focusedViewport() *viewport.Model {
 	default:
 		return &m.code
 	}
+}
+
+// paneAt returns the pane under the given terminal cell.
+func (m *WorkspaceModel) paneAt(x, y int) (Pane, bool) {
+	if m.layout.Tabbed {
+		return m.focused, true
+	}
+	for _, p := range []Pane{PaneStatement, PaneCode, PaneResults} {
+		if m.layout.RectFor(p).Contains(x, y) {
+			return p, true
+		}
+	}
+	return 0, false
+}
+
+func (m *WorkspaceModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	p, ok := m.paneAt(msg.X, msg.Y)
+	if !ok {
+		return m, nil
+	}
+	switch {
+	case tea.MouseEvent(msg).IsWheel():
+		vp := m.paneViewport(p)
+		if msg.Button == tea.MouseButtonWheelUp {
+			vp.ScrollUp(3)
+		} else {
+			vp.ScrollDown(3)
+		}
+	case msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft:
+		if m.focused != p {
+			m.focused = p
+			m.relayout()
+		}
+	}
+	return m, nil
 }
 
 func (m *WorkspaceModel) relayout() {

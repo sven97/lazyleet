@@ -305,10 +305,132 @@ func (m *BrowseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.statusMsg = fmt.Sprintf("synced %d problems", msg.count)
 		return m, m.loadProblems()
 
+	case tea.MouseMsg:
+		return m.handleMouse(msg)
+
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	}
 	return m, nil
+}
+
+// regionAt returns the pane under the given terminal cell.
+func (m *BrowseModel) regionAt(x, y int) (Region, bool) {
+	if m.layout.Single {
+		return m.focus, true
+	}
+	for _, r := range []Region{RegionStatus, RegionSources, RegionList, RegionDetail} {
+		if m.layout.RectFor(r).Contains(x, y) {
+			return r, true
+		}
+	}
+	return 0, false
+}
+
+// listRowAt maps a terminal row to a filtered-list index, or -1.
+func (m *BrowseModel) listRowAt(my int) int {
+	top := m.layout.List.Y + 2 // border + title
+	if m.filtering {
+		top++ // filter input line
+	}
+	top++ // column header
+	row := my - top
+	if row < 0 {
+		return -1
+	}
+	idx := m.top + row
+	if idx < 0 || idx >= len(m.filtered) {
+		return -1
+	}
+	return idx
+}
+
+// sourceRowAt maps a terminal row to a source index, or -1. Body layout:
+// line0 "PROBLEMS", line1 source[0], line2 blank, line3 "STUDY PLANS",
+// line4 source[1], line5 source[2], …
+func (m *BrowseModel) sourceRowAt(my int) int {
+	body := my - (m.layout.Sources.Y + 2) // border + title
+	switch {
+	case body == 1:
+		if len(m.sources) > 0 {
+			return 0
+		}
+	case body >= 4:
+		if idx := body - 3; idx < len(m.sources) {
+			return idx
+		}
+	}
+	return -1
+}
+
+func (m *BrowseModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	if m.filtering || m.showHelp {
+		return m, nil
+	}
+	reg, ok := m.regionAt(msg.X, msg.Y)
+	if !ok {
+		return m, nil
+	}
+
+	if tea.MouseEvent(msg).IsWheel() {
+		up := msg.Button == tea.MouseButtonWheelUp
+		switch reg {
+		case RegionList:
+			prev := m.cursor
+			if up {
+				m.cursor -= 2
+			} else {
+				m.cursor += 2
+			}
+			m.clampCursor()
+			if m.cursor != prev {
+				return m, m.debouncePreview()
+			}
+		case RegionSources:
+			if up && m.srcCursor > 0 {
+				m.srcCursor--
+			} else if !up && m.srcCursor < len(m.sources)-1 {
+				m.srcCursor++
+			}
+		case RegionDetail:
+			if up {
+				m.previewVP.ScrollUp(3)
+			} else {
+				m.previewVP.ScrollDown(3)
+			}
+		}
+		return m, nil
+	}
+
+	if msg.Action != tea.MouseActionPress || msg.Button != tea.MouseButtonLeft {
+		return m, nil
+	}
+
+	var cmd tea.Cmd
+	if m.focus != reg {
+		m.focus = reg
+		cmd = m.refreshDetail()
+	}
+	switch reg {
+	case RegionList:
+		if idx := m.listRowAt(msg.Y); idx >= 0 {
+			if idx == m.cursor { // second click on the selected row → open
+				if s := m.currentSlug(); s != "" {
+					m.Chosen = s
+					return m, tea.Quit
+				}
+			}
+			m.cursor = idx
+			m.clampCursor()
+			cmd = tea.Batch(cmd, m.debouncePreview())
+		}
+	case RegionSources:
+		if idx := m.sourceRowAt(msg.Y); idx >= 0 {
+			m.srcCursor = idx
+			cmd = tea.Batch(cmd, m.activateSource(idx))
+		}
+	}
+	return m, cmd
 }
 
 func (m *BrowseModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -417,19 +539,28 @@ func (m *BrowseModel) handleSourcesKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.srcCursor++
 		}
 	case key.Matches(msg, m.keys.Open):
-		m.activeSrc = m.srcCursor
-		src := m.sources[m.activeSrc]
-		var cmd tea.Cmd
-		if src.kind == srcPlan {
-			if _, ok := m.planCache[src.plan.Slug]; !ok {
-				cmd = m.loadPlanSlugs(src.plan)
-			}
-		}
-		m.rebuildView()
-		m.focus = RegionList
-		return m, tea.Batch(cmd, m.debouncePreview())
+		return m, m.activateSource(m.srcCursor)
 	}
 	return m, nil
+}
+
+// activateSource applies the source at idx (All Problems, or a study plan),
+// rebuilds the list, and moves focus there.
+func (m *BrowseModel) activateSource(idx int) tea.Cmd {
+	if idx < 0 || idx >= len(m.sources) {
+		return nil
+	}
+	m.activeSrc = idx
+	src := m.sources[idx]
+	var cmd tea.Cmd
+	if src.kind == srcPlan {
+		if _, ok := m.planCache[src.plan.Slug]; !ok {
+			cmd = m.loadPlanSlugs(src.plan)
+		}
+	}
+	m.rebuildView()
+	m.focus = RegionList
+	return tea.Batch(cmd, m.debouncePreview())
 }
 
 func (m *BrowseModel) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {

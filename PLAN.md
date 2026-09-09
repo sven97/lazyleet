@@ -375,8 +375,10 @@ done; submission history panel deferred. `internal/tui` + `cmd/lazyleet`.
 **Status: Not started**
 
 - [ ] Themes / color schemes; ASCII border + light-terminal fallbacks.
-- [ ] Mouse: click-to-select, wheel scroll, drag range — coordinates converted
-      through scroll origin.
+- [x] Mouse: click-to-focus panes, click-to-select list rows (double-click
+      opens), click a source to activate it, wheel scrolls the pane under the
+      cursor. Hit-testing via `Rect.Contains` + `regionAt`/`paneAt`. Drag-range
+      selection not done.
 - [ ] First-run wizard (auth, default language, editor).
 - [ ] Auth-expired and offline banners.
 - [ ] `leetcode.cn` region support.
@@ -403,6 +405,13 @@ done; submission history panel deferred. `internal/tui` + `cmd/lazyleet`.
 
 Append newest entries at the top. One entry per working session or milestone.
 
+- **2026-09-08 (n)** — Mouse: click + wheel. `Rect.Contains(x,y)` + per-model
+  hit-testing (`BrowseModel.regionAt` / `WorkspaceModel.paneAt`). Click focuses
+  the pane under the cursor; in browse, clicking a list row selects it (a second
+  click on the selected row opens the workspace), clicking a source activates it
+  (`activateSource` factored from the key handler). Wheel scrolls whatever pane
+  the cursor is over — list/sources move the cursor, viewports scroll.
+  `tea.MouseMsg` has no `IsWheel` (only `MouseEvent` does) → convert. 5 tests.
 - **2026-09-08 (m)** — Two-column layouts (user redesign). **Browse**: left
   column stacks Status (auth/region/sync summary) · Sources (All Problems +
   study plans) · List; right column is one Detail pane (statement, or the
