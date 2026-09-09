@@ -147,9 +147,6 @@ func (m *BrowseModel) dailyStatusLine(w int) string {
 		mark, state = m.th.Pass.Render("✓"), "done"
 	}
 	txt := "daily · " + state
-	if m.daily.Difficulty != "" {
-		txt += " · " + strings.ToLower(m.daily.Difficulty)
-	}
 	if m.daily.Streak > 0 {
 		txt += fmt.Sprintf(" · streak %d", m.daily.Streak)
 	}
