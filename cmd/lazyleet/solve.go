@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
@@ -105,7 +106,14 @@ func (a *appContext) resolveQuestion(ctx context.Context, slug string, refresh b
 	if !refresh {
 		if d, err := db.GetProblemDetail(ctx, slug, a.cfg.CacheTTL.D()); err == nil {
 			row, _ := db.GetProblem(ctx, slug)
-			return questionFromCache(d, row), "cache", nil
+			q := questionFromCache(d, row)
+			// A detail cached before we scraped example outputs has judge-able
+			// examples but no expected values — refetch once to fill them in.
+			// The recency check stops a problem that genuinely has no scrapable
+			// outputs from refetching on every open.
+			if !exampleOutputsMissing(q) || time.Since(d.FetchedAt) < time.Hour {
+				return q, "cache", nil
+			}
 		}
 	}
 
@@ -125,12 +133,19 @@ func (a *appContext) resolveQuestion(ctx context.Context, slug string, refresh b
 
 func cacheFromQuestion(q leetcode.Question) store.ProblemDetail {
 	snips, _ := json.Marshal(q.CodeSnippets)
+	var exCases string
+	if len(q.ExampleCases) > 0 {
+		if b, err := json.Marshal(q.ExampleCases); err == nil {
+			exCases = string(b)
+		}
+	}
 	return store.ProblemDetail{
 		Slug:             q.Slug,
 		QuestionID:       q.QuestionID,
 		StatementMD:      q.Statement,
 		MetaJSON:         q.MetaData,
 		ExampleTestcases: q.ExampleTestcases,
+		ExampleCasesJSON: exCases,
 		CodeSnippetsJSON: string(snips),
 	}
 }
@@ -157,7 +172,33 @@ func questionFromCache(d store.ProblemDetail, row store.Problem) leetcode.Questi
 			q.ExampleCases = cases
 		}
 	}
+	// Prefer the cached cases with scraped expected outputs, if we have them.
+	var stored []testcase.Case
+	if json.Unmarshal([]byte(orDefault(d.ExampleCasesJSON, "[]")), &stored) == nil && len(stored) > 0 {
+		q.ExampleCases = stored
+	}
 	return q
+}
+
+func orDefault(s, def string) string {
+	if s == "" {
+		return def
+	}
+	return s
+}
+
+// exampleOutputsMissing reports whether q has function-style examples but none
+// of them carry an expected output (so the local judge can't verify anything).
+func exampleOutputsMissing(q leetcode.Question) bool {
+	if q.Meta.Arity() == 0 || len(q.ExampleCases) == 0 {
+		return false
+	}
+	for _, c := range q.ExampleCases {
+		if c.Out != "" {
+			return false
+		}
+	}
+	return true
 }
 
 // pickLanguage chooses a fallback language when the requested one has no

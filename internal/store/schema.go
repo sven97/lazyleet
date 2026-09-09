@@ -66,4 +66,7 @@ CREATE TABLE workspace_state (
     created_at  INTEGER NOT NULL
 );
 `,
+	// 2: cache the worked example cases (inputs + scraped expected outputs) so
+	// they survive a cache round-trip; exampleTestcases alone is inputs-only.
+	`ALTER TABLE problem_detail ADD COLUMN example_cases TEXT NOT NULL DEFAULT '[]';`,
 }

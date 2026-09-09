@@ -153,6 +153,35 @@ func TestProblemDetailTTL(t *testing.T) {
 	}
 }
 
+func TestProblemDetailExampleCasesRoundTrip(t *testing.T) {
+	s, _ := Open(":memory:")
+	defer s.Close()
+	ctx := context.Background()
+
+	// a fresh row keeps the JSON we hand it
+	if err := s.PutProblemDetail(ctx, ProblemDetail{
+		Slug: "x", ExampleCasesJSON: `[{"in":["1002"],"out":"3"}]`,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetProblemDetail(ctx, "x", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ExampleCasesJSON != `[{"in":["1002"],"out":"3"}]` {
+		t.Fatalf("example_cases round-trip = %q", got.ExampleCasesJSON)
+	}
+
+	// a row written without it defaults to "[]" (covers migrated old rows)
+	if err := s.PutProblemDetail(ctx, ProblemDetail{Slug: "y"}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = s.GetProblemDetail(ctx, "y", time.Hour)
+	if got.ExampleCasesJSON != "[]" {
+		t.Fatalf("missing example_cases should default to []: %q", got.ExampleCasesJSON)
+	}
+}
+
 func TestReplaceProblemStatuses(t *testing.T) {
 	s, _ := Open(":memory:")
 	defer s.Close()

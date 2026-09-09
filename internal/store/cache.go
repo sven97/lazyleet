@@ -69,6 +69,7 @@ type ProblemDetail struct {
 	StatementMD      string
 	MetaJSON         string
 	ExampleTestcases string
+	ExampleCasesJSON string // JSON: []testcase.Case (inputs + expected outputs)
 	SampleTestcase   string
 	CodeSnippetsJSON string // JSON: langSlug -> code
 	HintsJSON        string
@@ -78,19 +79,21 @@ type ProblemDetail struct {
 // PutProblemDetail upserts a detail blob.
 func (s *Store) PutProblemDetail(ctx context.Context, d ProblemDetail) error {
 	_, err := s.db.ExecContext(ctx, `
-INSERT INTO problem_detail (slug, question_id, content_html, meta_data, example_testcases, sample_testcase, code_snippets, hints, similar, fetched_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, '[]', ?)
+INSERT INTO problem_detail (slug, question_id, content_html, meta_data, example_testcases, example_cases, sample_testcase, code_snippets, hints, similar, fetched_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', ?)
 ON CONFLICT(slug) DO UPDATE SET
     question_id = excluded.question_id,
     content_html = excluded.content_html,
     meta_data = excluded.meta_data,
     example_testcases = excluded.example_testcases,
+    example_cases = excluded.example_cases,
     sample_testcase = excluded.sample_testcase,
     code_snippets = excluded.code_snippets,
     hints = excluded.hints,
     fetched_at = excluded.fetched_at`,
 		d.Slug, d.QuestionID, d.StatementMD, orJSON(d.MetaJSON), d.ExampleTestcases,
-		d.SampleTestcase, orJSON(d.CodeSnippetsJSON), orJSONArray(d.HintsJSON), time.Now().Unix())
+		orJSONArray(d.ExampleCasesJSON), d.SampleTestcase, orJSON(d.CodeSnippetsJSON),
+		orJSONArray(d.HintsJSON), time.Now().Unix())
 	return err
 }
 
@@ -102,10 +105,10 @@ func (s *Store) GetProblemDetail(ctx context.Context, slug string, ttl time.Dura
 		fetchedAt int64
 	)
 	err := s.db.QueryRowContext(ctx, `
-SELECT slug, question_id, content_html, meta_data, example_testcases, sample_testcase, code_snippets, hints, fetched_at
+SELECT slug, question_id, content_html, meta_data, example_testcases, example_cases, sample_testcase, code_snippets, hints, fetched_at
 FROM problem_detail WHERE slug = ?`, slug).
 		Scan(&d.Slug, &d.QuestionID, &d.StatementMD, &d.MetaJSON, &d.ExampleTestcases,
-			&d.SampleTestcase, &d.CodeSnippetsJSON, &d.HintsJSON, &fetchedAt)
+			&d.ExampleCasesJSON, &d.SampleTestcase, &d.CodeSnippetsJSON, &d.HintsJSON, &fetchedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ProblemDetail{}, ErrNotCached
 	}
