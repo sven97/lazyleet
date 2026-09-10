@@ -32,6 +32,7 @@ type PlanRef struct {
 // today" and the streak's current-day-completed flag.
 type DailyInfo struct {
 	Date       string // YYYY-MM-DD
+	FrontendID int    // the number shown to users (e.g. 1 for Two Sum)
 	Slug       string
 	Title      string
 	Difficulty string
@@ -55,8 +56,14 @@ type BrowseData interface {
 	ListProblems(ctx context.Context) ([]BrowseRow, error)
 	// Auth returns the current auth/config summary (no network).
 	Auth(ctx context.Context) AuthState
-	// LastSync reports when the problem cache was last refreshed.
+	// CurrentUser returns the signed-in LeetCode username (one lightweight
+	// request). It returns "" when anonymous or the session has expired.
+	CurrentUser(ctx context.Context) (string, error)
+	// LastSync reports when the problem catalog was last refreshed.
 	LastSync(ctx context.Context) (t time.Time, ok bool)
+	// ProgressLastSync reports when the signed-in user's solve status was last
+	// refreshed (distinct from the full-catalog LastSync).
+	ProgressLastSync(ctx context.Context) (t time.Time, ok bool)
 	// Sync refreshes the whole problem catalog from LeetCode and returns the
 	// problem count.
 	Sync(ctx context.Context) (int, error)

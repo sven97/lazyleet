@@ -18,8 +18,10 @@ type fakeBrowseData struct {
 	stmts          map[string]string
 	synced         int
 	authed         bool
+	user           string
 	progressCalls  int
 	progressSolved int
+	progressSync   time.Time
 	daily          DailyInfo
 	dailyErr       error
 	dailyCalls     int
@@ -29,8 +31,12 @@ func (f *fakeBrowseData) ListProblems(context.Context) ([]BrowseRow, error) { re
 func (f *fakeBrowseData) Auth(context.Context) AuthState {
 	return AuthState{Authed: f.authed, Region: "com"}
 }
+func (f *fakeBrowseData) CurrentUser(context.Context) (string, error) { return f.user, nil }
 func (f *fakeBrowseData) LastSync(context.Context) (time.Time, bool) {
 	return time.Now().Add(-2 * time.Hour), true
+}
+func (f *fakeBrowseData) ProgressLastSync(context.Context) (time.Time, bool) {
+	return f.progressSync, !f.progressSync.IsZero()
 }
 func (f *fakeBrowseData) Sync(context.Context) (int, error) { f.synced++; return len(f.rows), nil }
 func (f *fakeBrowseData) SyncProgress(context.Context) (int, error) {
@@ -373,6 +379,58 @@ func TestBrowseStatusShowsDailyStreak(t *testing.T) {
 	}})
 	if !strings.Contains(m.dailyStatusLine(40), "done") {
 		t.Fatalf("daily line should read done: %q", m.dailyStatusLine(40))
+	}
+}
+
+func TestStatusDetailBodyShowsAccountSyncsAndDaily(t *testing.T) {
+	f := newFakeData()
+	f.authed = true
+	f.user = "sven"
+	f.rows[0].Status = "ac" // 1 of 3 solved
+	f.progressSync = time.Now().Add(-3 * time.Hour)
+
+	m := NewBrowseModel(f)
+	step(&m, tea.WindowSizeMsg{Width: 150, Height: 40})
+	step(&m, authLoadedMsg{a: AuthState{Authed: true}})
+	step(&m, userLoadedMsg{name: "sven"})
+	step(&m, browseLoadedMsg{
+		rows:         f.rows,
+		lastSync:     time.Now().Add(-26 * time.Hour),
+		progressSync: f.progressSync,
+	})
+	step(&m, dailyLoadedMsg{info: DailyInfo{
+		Date:       time.Now().Format("2006-01-02"),
+		FrontendID: 3157,
+		Slug:       "count-nodes-equal-to-average-of-subtree",
+		Title:      "Count Nodes Equal to Average of Subtree",
+		Difficulty: "Medium", Done: true, Streak: 3,
+	}})
+
+	body := m.statusDetailBody()
+	for _, want := range []string{
+		"Account", "sven",
+		"Catalog", "1d ago", // full-catalog freshness
+		"Progress", "1 / 3", "3h ago", // solve status + its own freshness
+		"Daily", "3157. Count Nodes Equal to Average of Subtree",
+		"Medium", "streak 3 days",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("statusDetailBody missing %q:\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, "auth.json") || strings.Contains(body, "lazyleet.db") {
+		t.Errorf("full cache-file paths should be gone:\n%s", body)
+	}
+}
+
+func TestStatusDetailBodyAnonymous(t *testing.T) {
+	m, _ := bootBrowse(t) // anonymous
+	body := m.statusDetailBody()
+	if !strings.Contains(body, "run `lazyleet auth`") {
+		t.Errorf("anonymous status should prompt to sign in:\n%s", body)
+	}
+	if !strings.Contains(body, "sign in to track") {
+		t.Errorf("Progress section should tell an anonymous user to sign in:\n%s", body)
 	}
 }
 

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"time"
 
 	"github.com/sven97/lazyleet/internal/leetcode"
 	"github.com/sven97/lazyleet/internal/plans"
@@ -55,7 +56,12 @@ func fetchAndCacheProgress(ctx context.Context, client *leetcode.Client, db *sto
 	for i, p := range tried {
 		triedSlugs[i] = p.Slug
 	}
-	return db.ReplaceProblemStatuses(ctx, acSlugs, triedSlugs)
+	n, err := db.ReplaceProblemStatuses(ctx, acSlugs, triedSlugs)
+	if err != nil {
+		return n, err
+	}
+	_ = db.SetMetaTime(ctx, store.MetaProgressSyncedAt, time.Now())
+	return n, nil
 }
 
 // cacheBundledPlans writes every compiled-in study plan into the store.

@@ -69,4 +69,12 @@ CREATE TABLE workspace_state (
 	// 2: cache the worked example cases (inputs + scraped expected outputs) so
 	// they survive a cache round-trip; exampleTestcases alone is inputs-only.
 	`ALTER TABLE problem_detail ADD COLUMN example_cases TEXT NOT NULL DEFAULT '[]';`,
+	// 3: a small key/value scratch table for cache bookkeeping that has no
+	// natural home on another row — e.g. when the signed-in user's solve status
+	// was last refreshed (distinct from the full-catalog sync recorded by
+	// problems.updated_at).
+	`CREATE TABLE meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);`,
 }

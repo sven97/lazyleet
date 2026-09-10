@@ -40,8 +40,14 @@ type BrowseModel struct {
 	ready         bool
 	layout        BrowseLayout
 	focus         Region
-	zoom          bool
-	showHelp      bool
+	// detailShowsStatus is true when the right-hand Detail pane holds the Status
+	// pane's expanded info rather than a problem statement. It follows the last
+	// left-column pane the user focused; focusing Detail itself (to scroll it)
+	// leaves it alone, so clicking into the status text to read it doesn't swap
+	// in a problem statement.
+	detailShowsStatus bool
+	zoom              bool
+	showHelp          bool
 
 	allRows   []BrowseRow
 	sources   []sourceItem
@@ -88,22 +94,24 @@ type BrowseModel struct {
 	dailyErr    error
 	dailyLoaded bool
 
-	spin        spinner.Model
-	syncing     bool
-	autoSynced  bool // guards the one-shot progress sync on browse open
-	progressing bool // a background SyncProgress is in flight
-	statusMsg   string
-	loadErr     error
-	lastSync    time.Time
+	spin         spinner.Model
+	syncing      bool
+	autoSynced   bool // guards the one-shot progress sync on browse open
+	progressing  bool // a background SyncProgress is in flight
+	statusMsg    string
+	loadErr      error
+	lastSync     time.Time // full problem catalog
+	progressSync time.Time // signed-in user's solve status
 
 	// Chosen is the slug the user opened, set just before tea.Quit.
 	Chosen string
 }
 
 type browseLoadedMsg struct {
-	rows     []BrowseRow
-	lastSync time.Time
-	err      error
+	rows         []BrowseRow
+	lastSync     time.Time
+	progressSync time.Time
+	err          error
 }
 type plansLoadedMsg struct{ plans []PlanRef }
 type planSlugsMsg struct {
@@ -161,6 +169,17 @@ func (m *BrowseModel) loadAuth() tea.Cmd {
 	return func() tea.Msg { return authLoadedMsg{a: m.data.Auth(context.Background())} }
 }
 
+type userLoadedMsg struct{ name string }
+
+// loadUser resolves the signed-in username in the background; a slow or failing
+// request just leaves the Account section showing "signed in".
+func (m *BrowseModel) loadUser() tea.Cmd {
+	return func() tea.Msg {
+		name, _ := m.data.CurrentUser(context.Background())
+		return userLoadedMsg{name: name}
+	}
+}
+
 type dailyLoadedMsg struct {
 	info DailyInfo
 	err  error
@@ -179,7 +198,8 @@ func (m *BrowseModel) loadProblems() tea.Cmd {
 	return func() tea.Msg {
 		rows, err := m.data.ListProblems(context.Background())
 		t, _ := m.data.LastSync(context.Background())
-		return browseLoadedMsg{rows: rows, lastSync: t, err: err}
+		pt, _ := m.data.ProgressLastSync(context.Background())
+		return browseLoadedMsg{rows: rows, lastSync: t, progressSync: pt, err: err}
 	}
 }
 
@@ -275,12 +295,26 @@ func (m *BrowseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !msg.lastSync.IsZero() {
 			m.lastSync = msg.lastSync
 		}
+		if !msg.progressSync.IsZero() {
+			m.progressSync = msg.progressSync
+		}
 		m.rebuildView()
 		return m, tea.Batch(m.debouncePreview(), m.maybeSyncProgress())
 
 	case authLoadedMsg:
 		m.auth = msg.a
-		return m, m.maybeSyncProgress()
+		var cmds []tea.Cmd
+		if m.auth.Authed {
+			cmds = append(cmds, m.loadUser())
+		}
+		cmds = append(cmds, m.maybeSyncProgress())
+		return m, tea.Batch(cmds...)
+
+	case userLoadedMsg:
+		if msg.name != "" {
+			m.auth.User = msg.name
+		}
+		return m, nil
 
 	case dailyLoadedMsg:
 		m.dailyLoaded = true
@@ -350,7 +384,7 @@ func (m *BrowseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case previewRenderedMsg:
 		m.renderCache[msg.key] = previewEntry{content: msg.content, prefix: msg.prefix}
-		if msg.key == m.previewKey() && m.focus != RegionStatus {
+		if msg.key == m.previewKey() && !m.detailShowsStatus {
 			m.previewVP.SetContent(msg.content)
 			m.previewVP.GotoTop()
 			m.previewContentSlug = m.previewSlug
@@ -373,6 +407,7 @@ func (m *BrowseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.statusMsg = "progress sync failed: " + msg.err.Error()
 			return m, nil
 		}
+		m.progressSync = time.Now()
 		m.statusMsg = fmt.Sprintf("progress synced · %d solved", msg.solved)
 		return m, m.loadProblems()
 
@@ -461,9 +496,9 @@ func (m *BrowseModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		switch reg {
 		case RegionList:
 			if up {
-				m.scrollList(-3)
+				m.scrollList(-wheelScrollLines)
 			} else {
-				m.scrollList(3)
+				m.scrollList(wheelScrollLines)
 			}
 		case RegionSources:
 			if up && m.srcCursor > 0 {
@@ -473,9 +508,9 @@ func (m *BrowseModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			}
 		case RegionDetail:
 			if up {
-				m.previewVP.ScrollUp(3)
+				m.previewVP.ScrollUp(wheelScrollLines)
 			} else {
-				m.previewVP.ScrollDown(3)
+				m.previewVP.ScrollDown(wheelScrollLines)
 			}
 		}
 		return m, nil
@@ -487,8 +522,12 @@ func (m *BrowseModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 
 	var cmd tea.Cmd
 	if m.focus != reg {
-		m.focus = reg
-		cmd = m.refreshDetail()
+		m.setFocus(reg)
+		// Focusing Detail only makes it scrollable — its content and scroll
+		// position stay put. Focusing a left pane may change what Detail shows.
+		if reg != RegionDetail {
+			cmd = m.refreshDetail()
+		}
 	}
 	switch reg {
 	case RegionList:
@@ -556,10 +595,10 @@ func (m *BrowseModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.refreshDetail()
 
 	case key.Matches(msg, m.keys.NextPane):
-		m.focus = m.focus.next()
+		m.setFocus(m.focus.next())
 		return m, m.refreshDetail()
 	case key.Matches(msg, m.keys.PrevPane):
-		m.focus = m.focus.prev()
+		m.setFocus(m.focus.prev())
 		return m, m.refreshDetail()
 
 	case key.Matches(msg, m.keys.Filter):
@@ -569,7 +608,7 @@ func (m *BrowseModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	case key.Matches(msg, m.keys.PreviewTab):
-		if m.focus == RegionStatus {
+		if m.detailShowsStatus {
 			return m, nil
 		}
 		m.previewTab = (m.previewTab + 1) % 2
@@ -643,7 +682,7 @@ func (m *BrowseModel) activateSource(idx int) tea.Cmd {
 		}
 	}
 	m.rebuildView()
-	m.focus = RegionList
+	m.setFocus(RegionList)
 	return tea.Batch(cmd, m.debouncePreview())
 }
 
@@ -891,10 +930,24 @@ func (m *BrowseModel) relayout() {
 	m.clampCursor()
 }
 
+// setFocus moves focus to reg and keeps the Detail pane's context in sync:
+// focusing a left-column pane decides whether Detail shows the Status info or a
+// problem statement; focusing Detail itself leaves that choice untouched so the
+// pane can be scrolled without its content changing under the cursor.
+func (m *BrowseModel) setFocus(reg Region) {
+	m.focus = reg
+	switch reg {
+	case RegionStatus:
+		m.detailShowsStatus = true
+	case RegionSources, RegionList:
+		m.detailShowsStatus = false
+	}
+}
+
 // refreshDetail updates the right-hand pane for the current focus: the Status
 // pane's expanded info when it is focused, otherwise the problem statement.
 func (m *BrowseModel) refreshDetail() tea.Cmd {
-	if m.focus == RegionStatus {
+	if m.detailShowsStatus {
 		m.previewVP.SetContent(m.statusDetailBody())
 		m.previewVP.GotoTop()
 		return nil

@@ -2,6 +2,9 @@ package tui
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -154,61 +157,118 @@ func (m *BrowseModel) dailyStatusLine(w int) string {
 }
 
 // statusDetailBody is the expanded info shown in the Detail pane while the
-// Status pane is focused.
+// Status pane is focused: who you are, how fresh the two caches are (the full
+// problem catalog and your own solve status), and today's daily challenge.
 func (m *BrowseModel) statusDetailBody() string {
+	th := m.th
 	var b strings.Builder
-	b.WriteString(m.th.Title.Render("Authentication") + "\n")
-	if m.auth.Authed {
-		who := "yes"
-		if m.auth.User != "" {
-			who = m.auth.User
-		}
-		b.WriteString("  signed in   " + who + "\n")
-	} else {
-		b.WriteString("  signed in   " + m.th.Muted.Render("no — run `lazyleet auth`") + "\n")
+	row := func(k, v string) { b.WriteString("  " + fmt.Sprintf("%-11s", k) + v + "\n") }
+	section := func(name string) { b.WriteString("\n" + th.Title.Render(name) + "\n") }
+
+	b.WriteString(th.Title.Render("Account") + "\n")
+	switch {
+	case !m.auth.Authed:
+		row("user", th.Muted.Render("anonymous — run `lazyleet auth`"))
+	case m.auth.User != "":
+		row("user", m.auth.User)
+	default:
+		row("user", th.Muted.Render("signed in"))
 	}
-	b.WriteString("  region      " + firstNonEmptyStr(m.auth.Region, "com") + "\n")
-	if m.auth.AuthFile != "" {
-		b.WriteString("  auth file   " + m.th.Muted.Render(m.auth.AuthFile) + "\n")
-	}
-	b.WriteString("\n" + m.th.Title.Render("Cache") + "\n")
-	b.WriteString(fmt.Sprintf("  problems    %d\n", len(m.allRows)))
-	if m.lastSync.IsZero() {
-		b.WriteString("  synced      " + m.th.Muted.Render("never — press s") + "\n")
-	} else {
-		b.WriteString("  synced      " + roughAge(time.Since(m.lastSync)) + " ago\n")
-	}
-	if m.auth.CacheDB != "" {
-		b.WriteString("  database    " + m.th.Muted.Render(m.auth.CacheDB) + "\n")
+	if r := m.auth.Region; r != "" && r != "com" {
+		row("region", r)
 	}
 
-	b.WriteString("\n" + m.th.Title.Render("Daily Challenge") + "\n")
+	section("Catalog")
+	row("problems", strconv.Itoa(len(m.allRows)))
+	row("synced", m.syncAge(m.lastSync, "never — press s"))
+
+	section("Progress")
+	if !m.auth.Authed {
+		row("solved", th.Muted.Render("sign in to track"))
+	} else {
+		row("solved", fmt.Sprintf("%d / %d", m.solvedCount(), len(m.allRows)))
+		pending := "not yet — syncs on open"
+		if m.progressing {
+			pending = "syncing…"
+		}
+		row("synced", m.syncAge(m.progressSync, pending))
+	}
+
+	section("Daily")
 	switch {
 	case m.dailyErr != nil:
-		b.WriteString("  " + m.th.Muted.Render("unavailable — "+m.dailyErr.Error()) + "\n")
+		b.WriteString("  " + th.Muted.Render("unavailable — "+m.dailyErr.Error()) + "\n")
 	case !m.dailyLoaded || m.daily.Slug == "":
-		b.WriteString("  " + m.th.Muted.Render("loading…") + "\n")
+		b.WriteString("  " + th.Muted.Render("loading…") + "\n")
 	default:
-		if m.daily.Date != "" {
-			b.WriteString("  date        " + m.daily.Date + "\n")
+		name := m.daily.Title
+		if m.daily.FrontendID > 0 {
+			name = fmt.Sprintf("%d. %s", m.daily.FrontendID, m.daily.Title)
 		}
-		title := m.daily.Title
+		row("problem", name)
 		if m.daily.Difficulty != "" {
-			title += " (" + m.daily.Difficulty + ")"
+			row("difficulty", DifficultyStyle(m.daily.Difficulty).Render(m.daily.Difficulty))
 		}
-		b.WriteString("  today       " + title + "\n")
+		status := th.Muted.Render("○ not done")
 		if m.daily.Done {
-			b.WriteString("  status      " + m.th.Pass.Render("done") + "\n")
-		} else {
-			b.WriteString("  status      " + m.th.Muted.Render("not done") + "\n")
+			status = th.Pass.Render("✓ done")
 		}
-		if m.auth.Authed {
-			b.WriteString(fmt.Sprintf("  streak      %d day(s)\n", m.daily.Streak))
-		} else {
-			b.WriteString("  streak      " + m.th.Muted.Render("sign in to track") + "\n")
+		if m.auth.Authed && m.daily.Streak > 0 {
+			status += th.Muted.Render("  ·  streak " + plural(m.daily.Streak, "day"))
+		}
+		row("status", status)
+		if today := time.Now().Format("2006-01-02"); m.daily.Date != "" && m.daily.Date != today {
+			b.WriteString("  " + th.Muted.Render("cached "+m.daily.Date) + "\n")
 		}
 	}
+
+	if dir := dataDir(m.auth); dir != "" {
+		b.WriteString("\n" + th.Muted.Render(dir) + "\n")
+	}
 	return b.String()
+}
+
+// syncAge renders "<rough age> ago", or the muted fallback when t is unset.
+func (m *BrowseModel) syncAge(t time.Time, fallback string) string {
+	if t.IsZero() {
+		return m.th.Muted.Render(fallback)
+	}
+	return roughAge(time.Since(t)) + " ago"
+}
+
+func (m *BrowseModel) solvedCount() int {
+	n := 0
+	for _, r := range m.allRows {
+		if r.Solved() {
+			n++
+		}
+	}
+	return n
+}
+
+// plural renders "1 day" / "3 days" (the plural is the noun + "s").
+func plural(n int, noun string) string {
+	if n == 1 {
+		return "1 " + noun
+	}
+	return fmt.Sprintf("%d %ss", n, noun)
+}
+
+// dataDir is the directory holding auth.json and the cache DB, with $HOME
+// collapsed to "~". Empty when neither path is known.
+func dataDir(a AuthState) string {
+	p := a.AuthFile
+	if p == "" {
+		p = a.CacheDB
+	}
+	if p == "" {
+		return ""
+	}
+	dir := filepath.Dir(p)
+	if home, err := os.UserHomeDir(); err == nil && home != "" && strings.HasPrefix(dir, home) {
+		dir = "~" + dir[len(home):]
+	}
+	return dir
 }
 
 func firstNonEmptyStr(a, b string) string {
@@ -325,7 +385,7 @@ func (m *BrowseModel) formatRow(r BrowseRow, w int) string {
 }
 
 func (m *BrowseModel) detailTitle() string {
-	if m.focus == RegionStatus {
+	if m.detailShowsStatus {
 		return "Status detail"
 	}
 	if m.previewTab == 1 {
@@ -338,7 +398,7 @@ func (m *BrowseModel) detailTitle() string {
 }
 
 func (m *BrowseModel) detailBody() string {
-	if m.focus == RegionStatus {
+	if m.detailShowsStatus {
 		return m.previewVP.View() // holds statusDetailBody, set by refreshDetail
 	}
 	if m.previewTab == 1 {

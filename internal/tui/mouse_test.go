@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -85,6 +86,39 @@ func TestBrowseWheelOverListScrollsWithoutMovingCursor(t *testing.T) {
 	}
 	if m.cursor != 0 {
 		t.Fatalf("wheel must not move the selection, cursor=%d", m.cursor)
+	}
+}
+
+func TestBrowseClickDetailKeepsStatusContent(t *testing.T) {
+	m, _ := bootBrowse(t)
+	center := func(r Rect) (int, int) { return r.X + r.W/2, r.Y + r.H/2 }
+
+	// Focus the Status pane: the right panel now shows the expanded status info.
+	sx, sy := center(m.layout.Status)
+	step(&m, press(sx, sy))
+	if !m.detailShowsStatus || !strings.Contains(m.detailBody(), "Account") {
+		t.Fatalf("clicking Status should show status detail on the right, got:\n%s", m.detailBody())
+	}
+
+	// Clicking the right panel focuses it for scrolling without swapping the
+	// status text out for a problem statement.
+	dx, dy := center(m.layout.Detail)
+	step(&m, press(dx, dy))
+	if m.focus != RegionDetail {
+		t.Fatalf("clicking the right panel should focus it, got %v", m.focus)
+	}
+	if !m.detailShowsStatus || m.detailTitle() != "Status detail" {
+		t.Fatalf("focusing Detail must not change its context: title=%q", m.detailTitle())
+	}
+	if !strings.Contains(m.detailBody(), "Account") {
+		t.Fatalf("right panel should still show status content, got:\n%s", m.detailBody())
+	}
+
+	// Clicking back into the list restores the problem statement.
+	lx, ly := center(m.layout.List)
+	step(&m, press(lx, ly))
+	if m.detailShowsStatus {
+		t.Fatalf("clicking the list should return the right panel to a problem statement")
 	}
 }
 

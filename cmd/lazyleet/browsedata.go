@@ -66,9 +66,29 @@ func (b *browseData) ListProblems(ctx context.Context) ([]tui.BrowseRow, error) 
 	return out, nil
 }
 
+func (b *browseData) CurrentUser(ctx context.Context) (string, error) {
+	creds, _ := b.app.loadCredentials()
+	if creds.Anonymous() {
+		return "", nil
+	}
+	client, err := b.app.newClient()
+	if err != nil {
+		return "", err
+	}
+	return client.WhoAmI(ctx)
+}
+
 func (b *browseData) LastSync(ctx context.Context) (time.Time, bool) {
 	t, err := b.db.ProblemsLastSynced(ctx)
 	if err != nil || t.IsZero() {
+		return time.Time{}, false
+	}
+	return t, true
+}
+
+func (b *browseData) ProgressLastSync(ctx context.Context) (time.Time, bool) {
+	t, ok, err := b.db.GetMetaTime(ctx, store.MetaProgressSyncedAt)
+	if err != nil || !ok {
 		return time.Time{}, false
 	}
 	return t, true
@@ -110,6 +130,7 @@ func (b *browseData) Daily(ctx context.Context) (tui.DailyInfo, error) {
 	}
 	info := tui.DailyInfo{
 		Date:       dc.Date,
+		FrontendID: dc.Question.FrontendID,
 		Slug:       dc.Slug,
 		Title:      dc.Question.Title,
 		Difficulty: dc.Question.Difficulty,
