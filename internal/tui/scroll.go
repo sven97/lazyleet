@@ -1,6 +1,21 @@
 package tui
 
-import tea "github.com/charmbracelet/bubbletea"
+import (
+	"log"
+	"os"
+
+	tea "github.com/charmbracelet/bubbletea"
+)
+
+// debugScroll turns on verbose scroll/render tracing to the tea.LogToFile sink
+// when LAZYLEET_DEBUG names a log file. Diagnostic only.
+var debugScroll = os.Getenv("LAZYLEET_DEBUG") != ""
+
+func scrollLogf(format string, args ...any) {
+	if debugScroll {
+		log.Printf("[scroll] "+format, args...)
+	}
+}
 
 // wheelGuard is implemented by models that can say a mouse-wheel event would do
 // nothing because the pane under the cursor is already at the edge it is trying
@@ -21,8 +36,10 @@ func WheelEdgeFilter(model tea.Model, msg tea.Msg) tea.Msg {
 		return msg
 	}
 	if g, ok := model.(wheelGuard); ok && g.wheelAtEdge(mm) {
+		scrollLogf("filter DROP wheel btn=%v x=%d y=%d", mm.Button, mm.X, mm.Y)
 		return nil
 	}
+	scrollLogf("filter PASS wheel btn=%v x=%d y=%d", mm.Button, mm.X, mm.Y)
 	return msg
 }
 

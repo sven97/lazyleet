@@ -270,6 +270,11 @@ func (m *BrowseModel) debouncePreview() tea.Cmd {
 // --- update --------------------------------------------------------------
 
 func (m *BrowseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if debugScroll {
+		if _, isTick := msg.(spinner.TickMsg); !isTick {
+			scrollLogf("browse Update <- %T  top=%d detailStatus=%v", msg, m.top, m.detailShowsStatus)
+		}
+	}
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
@@ -895,6 +900,7 @@ func (m *BrowseModel) wheelAtEdge(msg tea.MouseMsg) bool {
 	}
 	reg, ok := m.regionAt(msg.X, msg.Y)
 	if !ok {
+		scrollLogf("browse wheelAtEdge: no region at x=%d y=%d single=%v", msg.X, msg.Y, m.layout.Single)
 		return true
 	}
 	up := msg.Button == tea.MouseButtonWheelUp
@@ -904,6 +910,8 @@ func (m *BrowseModel) wheelAtEdge(msg tea.MouseMsg) bool {
 		if maxTop < 0 {
 			maxTop = 0
 		}
+		scrollLogf("browse wheelAtEdge: RegionList up=%v top=%d maxTop=%d listRows=%d filtered=%d",
+			up, m.top, maxTop, m.listRows(), len(m.filtered))
 		if up {
 			return m.top <= 0
 		}
