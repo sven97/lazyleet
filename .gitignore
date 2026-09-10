@@ -16,3 +16,6 @@ auth.json
 .DS_Store
 .idea/
 .vscode/
+
+# Local-only planning & research notes (PLAN.md, design research, scratch)
+/notes/

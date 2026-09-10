@@ -4,8 +4,7 @@ A lazygit-style terminal UI for practising on LeetCode: browse problems and
 study plans, then solve them in a side-by-side workspace with a local test
 runner and one-key submit — in your own editor.
 
-> **Status: early development.** See [`PLAN.md`](PLAN.md) for the phase-by-phase
-> build plan, progress log, and findings. Working now: browse mode (`lazyleet`)
+> **Status: early development.** Working now: browse mode (`lazyleet`)
 > — a sources sidebar, a fuzzy-filterable problem list, study plans with
 > progress, and a live statement preview, all read from a local SQLite cache;
 > and the coding workspace — statement + live solution mirror + local Python
