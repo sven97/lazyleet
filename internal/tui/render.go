@@ -6,6 +6,7 @@ import (
 
 	"github.com/alecthomas/chroma/v2/quick"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/sven97/lazyleet/internal/runner"
 )
@@ -195,19 +196,13 @@ func renderRemote(th Theme, kind string, out *RemoteOutcome, err error, running 
 	return b.String()
 }
 
+// truncate shortens s to at most max terminal cells, adding an ellipsis when it
+// cuts. It measures by display width and is ANSI- and grapheme-aware, so a wide
+// glyph (emoji like 🔒, CJK) or an embedded style sequence can't push the line
+// past max and wrap onto the next row.
 func truncate(s string, max int) string {
 	if max < 1 {
 		max = 1
 	}
-	if lipgloss.Width(s) <= max {
-		return s
-	}
-	r := []rune(s)
-	if len(r) <= max {
-		return s
-	}
-	if max <= 1 {
-		return "…"
-	}
-	return string(r[:max-1]) + "…"
+	return ansi.Truncate(s, max, "…")
 }
