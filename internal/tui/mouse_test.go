@@ -89,6 +89,27 @@ func TestBrowseWheelOverListScrollsWithoutMovingCursor(t *testing.T) {
 	}
 }
 
+func TestHorizontalWheelNeverScrollsTheList(t *testing.T) {
+	m, _ := bootBrowse(t)
+	step(&m, tea.WindowSizeMsg{Width: 150, Height: 16}) // overflow the list
+	lx, ly := m.layout.List.X+3, m.layout.List.Y+m.layout.List.H/2
+
+	right := tea.MouseMsg{X: lx, Y: ly, Action: tea.MouseActionPress, Button: tea.MouseButtonWheelRight}
+	left := tea.MouseMsg{X: lx, Y: ly, Action: tea.MouseActionPress, Button: tea.MouseButtonWheelLeft}
+
+	// The filter drops horizontal wheel events outright.
+	if WheelEdgeFilter(m, right) != nil || WheelEdgeFilter(m, left) != nil {
+		t.Fatal("horizontal wheel events should be dropped by the filter")
+	}
+
+	// And even if one reaches the handler directly, it must not move the list.
+	step(&m, right)
+	step(&m, right)
+	if m.top != 0 {
+		t.Fatalf("WheelRight must not scroll the list, got m.top=%d", m.top)
+	}
+}
+
 func TestWheelEdgeFilterDropsNoopScrolls(t *testing.T) {
 	m, _ := bootBrowse(t)
 

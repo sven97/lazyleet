@@ -498,6 +498,11 @@ func (m *BrowseModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 
 	if tea.MouseEvent(msg).IsWheel() {
 		up := msg.Button == tea.MouseButtonWheelUp
+		// Only vertical wheel scrolls. A trackpad also emits WheelLeft/Right on a
+		// slightly diagonal flick; treating those as "down" made the list jitter.
+		if !up && msg.Button != tea.MouseButtonWheelDown {
+			return m, nil
+		}
 		switch reg {
 		case RegionList:
 			if up {
@@ -895,6 +900,9 @@ func (m *BrowseModel) scrollList(delta int) {
 // cursor is already at the top (wheel-up) or bottom (wheel-down) of its content,
 // or the event lands somewhere a wheel never scrolls. See WheelEdgeFilter.
 func (m *BrowseModel) wheelAtEdge(msg tea.MouseMsg) bool {
+	if msg.Button != tea.MouseButtonWheelUp && msg.Button != tea.MouseButtonWheelDown {
+		return true // horizontal wheel never scrolls a vertical pane
+	}
 	if m.filtering || m.showHelp {
 		return true
 	}

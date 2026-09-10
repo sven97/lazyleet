@@ -496,6 +496,9 @@ func (m *WorkspaceModel) paneAt(x, y int) (Pane, bool) {
 // cursor is already at the top (wheel-up) or bottom (wheel-down) of its content.
 // See WheelEdgeFilter.
 func (m *WorkspaceModel) wheelAtEdge(msg tea.MouseMsg) bool {
+	if msg.Button != tea.MouseButtonWheelUp && msg.Button != tea.MouseButtonWheelDown {
+		return true // horizontal wheel never scrolls a vertical pane
+	}
 	p, ok := m.paneAt(msg.X, msg.Y)
 	if !ok {
 		return true
@@ -514,11 +517,12 @@ func (m *WorkspaceModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 	switch {
 	case tea.MouseEvent(msg).IsWheel():
-		vp := m.paneViewport(p)
-		if msg.Button == tea.MouseButtonWheelUp {
-			vp.ScrollUp(wheelScrollLines)
-		} else {
-			vp.ScrollDown(wheelScrollLines)
+		// Only vertical wheel scrolls; ignore trackpad WheelLeft/Right noise.
+		switch msg.Button {
+		case tea.MouseButtonWheelUp:
+			m.paneViewport(p).ScrollUp(wheelScrollLines)
+		case tea.MouseButtonWheelDown:
+			m.paneViewport(p).ScrollDown(wheelScrollLines)
 		}
 	case msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft:
 		if m.focused != p {

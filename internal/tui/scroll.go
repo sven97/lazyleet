@@ -58,6 +58,13 @@ func WheelEdgeFilter(model tea.Model, msg tea.Msg) tea.Msg {
 	if !ok || !tea.MouseEvent(mm).IsWheel() {
 		return msg
 	}
+	// Horizontal wheel (WheelLeft/Right) never scrolls a vertical list or
+	// viewport — a macOS trackpad emits it on any slightly diagonal flick, so
+	// drop it before it can reach Update and cause a no-op repaint.
+	if mm.Button != tea.MouseButtonWheelUp && mm.Button != tea.MouseButtonWheelDown {
+		scrollLogf("filter DROP horizontal wheel btn=%v", mm.Button)
+		return nil
+	}
 	if g, ok := model.(wheelGuard); ok && g.wheelAtEdge(mm) {
 		scrollLogf("filter DROP wheel btn=%v x=%d y=%d", mm.Button, mm.X, mm.Y)
 		return nil
