@@ -17,6 +17,29 @@ func scrollLogf(format string, args ...any) {
 	}
 }
 
+var lastTracedView = map[string]uint64{}
+
+// traceView logs when a model's rendered frame actually changes, so a flicker
+// with no corresponding Update can be told apart from a real repaint.
+func traceView(who, frame string) {
+	h := fnv1a(frame)
+	if lastTracedView[who] == h {
+		return
+	}
+	lastTracedView[who] = h
+	log.Printf("[scroll] %s View changed (len=%d hash=%x)", who, len(frame), h)
+}
+
+func fnv1a(s string) uint64 {
+	const off, prime = 1469598103934665603, 1099511628211
+	h := uint64(off)
+	for i := 0; i < len(s); i++ {
+		h ^= uint64(s[i])
+		h *= prime
+	}
+	return h
+}
+
 // wheelGuard is implemented by models that can say a mouse-wheel event would do
 // nothing because the pane under the cursor is already at the edge it is trying
 // to scroll past.

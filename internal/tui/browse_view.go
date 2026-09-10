@@ -11,7 +11,10 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-func (m *BrowseModel) View() string {
+func (m *BrowseModel) View() (out string) {
+	if debugScroll {
+		defer func() { traceView("browse", out) }()
+	}
 	if !m.ready {
 		return "loading browse…"
 	}

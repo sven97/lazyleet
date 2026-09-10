@@ -320,6 +320,11 @@ func (m *WorkspaceModel) importFailingCase() (tea.Model, tea.Cmd) {
 
 // Update implements tea.Model.
 func (m *WorkspaceModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if debugScroll {
+		if _, isTick := msg.(spinner.TickMsg); !isTick {
+			scrollLogf("workspace Update <- %T  focused=%v", msg, m.focused)
+		}
+	}
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
@@ -618,7 +623,10 @@ func (m *WorkspaceModel) reloadCode() {
 }
 
 // View implements tea.Model.
-func (m *WorkspaceModel) View() string {
+func (m *WorkspaceModel) View() (out string) {
+	if debugScroll {
+		defer func() { traceView("workspace", out) }()
+	}
 	if !m.ready {
 		return "loading workspace…"
 	}
