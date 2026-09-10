@@ -30,6 +30,7 @@ func runBrowse(app *appContext) error {
 			bm,
 			tea.WithAltScreen(),
 			tea.WithMouseCellMotion(),
+			tea.WithFPS(uiFPS),
 			tea.WithOutput(iw),
 		).Run()
 		if err != nil {

@@ -496,9 +496,9 @@ func (m *WorkspaceModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	case tea.MouseEvent(msg).IsWheel():
 		vp := m.paneViewport(p)
 		if msg.Button == tea.MouseButtonWheelUp {
-			vp.ScrollUp(3)
+			vp.ScrollUp(wheelScrollLines)
 		} else {
-			vp.ScrollDown(3)
+			vp.ScrollDown(wheelScrollLines)
 		}
 	case msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft:
 		if m.focused != p {

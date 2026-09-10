@@ -8,6 +8,12 @@ import (
 	"github.com/sven97/lazyleet/internal/config"
 )
 
+// uiFPS caps the Bubble Tea renderer's frame rate. The library default is 60;
+// bumping it to its ceiling of 120 keeps scrolling in step with the display
+// refresh on ProMotion Macs, where 60 fps reads as visibly choppier than the
+// terminal's own scrollback.
+const uiFPS = 120
+
 // appContext carries process-wide dependencies resolved once in
 // PersistentPreRunE and used by subcommands.
 type appContext struct {
