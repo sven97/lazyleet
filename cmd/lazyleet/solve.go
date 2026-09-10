@@ -85,7 +85,8 @@ func (a *appContext) openWorkspace(ctx context.Context, slug, lang string, refre
 	m.EnableImages(termimg.Detect(a.cfg.Images), a.paths.ImageCacheDir, iw)
 
 	_, err = tea.NewProgram(m,
-		tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithFPS(uiFPS), tea.WithOutput(iw),
+		tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithFPS(uiFPS),
+		tea.WithFilter(tui.WheelEdgeFilter), tea.WithOutput(iw),
 	).Run()
 	return err
 }

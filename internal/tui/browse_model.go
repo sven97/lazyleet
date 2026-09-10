@@ -886,6 +886,43 @@ func (m *BrowseModel) scrollList(delta int) {
 	}
 }
 
+// wheelAtEdge reports whether a wheel event would do nothing: the pane under the
+// cursor is already at the top (wheel-up) or bottom (wheel-down) of its content,
+// or the event lands somewhere a wheel never scrolls. See WheelEdgeFilter.
+func (m *BrowseModel) wheelAtEdge(msg tea.MouseMsg) bool {
+	if m.filtering || m.showHelp {
+		return true
+	}
+	reg, ok := m.regionAt(msg.X, msg.Y)
+	if !ok {
+		return true
+	}
+	up := msg.Button == tea.MouseButtonWheelUp
+	switch reg {
+	case RegionList:
+		maxTop := len(m.filtered) - m.listRows()
+		if maxTop < 0 {
+			maxTop = 0
+		}
+		if up {
+			return m.top <= 0
+		}
+		return m.top >= maxTop
+	case RegionDetail:
+		if up {
+			return m.previewVP.AtTop()
+		}
+		return m.previewVP.AtBottom()
+	case RegionSources:
+		if up {
+			return m.srcCursor <= 0
+		}
+		return m.srcCursor >= len(m.sources)-1
+	default: // RegionStatus — static, a wheel never moves it
+		return true
+	}
+}
+
 // sourcesRows is how many body lines the Sources pane needs: a "PROBLEMS"
 // header, one line per source, and a blank + "STUDY PLANS" header.
 func (m *BrowseModel) sourcesRows() int { return len(m.sources) + 3 }

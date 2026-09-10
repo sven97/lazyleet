@@ -89,6 +89,58 @@ func TestBrowseWheelOverListScrollsWithoutMovingCursor(t *testing.T) {
 	}
 }
 
+func TestWheelEdgeFilterDropsNoopScrolls(t *testing.T) {
+	m, _ := bootBrowse(t)
+
+	// The 3-row fixture list fits its pane, so it can't scroll either way.
+	lx, ly := m.layout.List.X+3, m.layout.List.Y+m.layout.List.H/2
+	if WheelEdgeFilter(m, wheel(lx, ly, true)) != nil {
+		t.Fatal("wheel-up over a list that fits should be dropped")
+	}
+	if WheelEdgeFilter(m, wheel(lx, ly, false)) != nil {
+		t.Fatal("wheel-down over a list that fits should be dropped")
+	}
+
+	// Shrink so the list overflows: wheel-up at the top is still a no-op, but
+	// wheel-down now has somewhere to go and must pass through.
+	step(&m, tea.WindowSizeMsg{Width: 150, Height: 16})
+	lx, ly = m.layout.List.X+3, m.layout.List.Y+m.layout.List.H/2
+	if m.top != 0 {
+		t.Fatalf("precondition: list starts at the top, m.top=%d", m.top)
+	}
+	if WheelEdgeFilter(m, wheel(lx, ly, true)) != nil {
+		t.Fatal("wheel-up at the top of an overflowing list should be dropped")
+	}
+	if WheelEdgeFilter(m, wheel(lx, ly, false)) == nil {
+		t.Fatal("wheel-down with rows below the fold should pass through")
+	}
+
+	// Non-wheel mouse events are never touched.
+	if WheelEdgeFilter(m, press(lx, ly)) == nil {
+		t.Fatal("a click must not be filtered")
+	}
+}
+
+func TestWheelEdgeFilterWorkspaceShortContent(t *testing.T) {
+	q, _ := leetcode.Fixture("two-sum")
+	ws, _ := workspace.Scaffold(t.TempDir(), q, "python3")
+	m, err := NewWorkspaceModel(ws, q, "true", false, 400, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.watcher.Close()
+	up, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 200})
+	m = up.(*WorkspaceModel)
+
+	sx, sy := m.layout.Statement.X+m.layout.Statement.W/2, m.layout.Statement.Y+3
+	if WheelEdgeFilter(m, wheel(sx, sy, true)) != nil {
+		t.Fatal("wheel-up over statement content that fits should be dropped")
+	}
+	if WheelEdgeFilter(m, wheel(sx, sy, false)) != nil {
+		t.Fatal("wheel-down over statement content that fits should be dropped")
+	}
+}
+
 func TestBrowseClickDetailKeepsStatusContent(t *testing.T) {
 	m, _ := bootBrowse(t)
 	center := func(r Rect) (int, int) { return r.X + r.W/2, r.Y + r.H/2 }

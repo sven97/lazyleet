@@ -487,6 +487,21 @@ func (m *WorkspaceModel) paneAt(x, y int) (Pane, bool) {
 	return 0, false
 }
 
+// wheelAtEdge reports whether a wheel event would do nothing: the pane under the
+// cursor is already at the top (wheel-up) or bottom (wheel-down) of its content.
+// See WheelEdgeFilter.
+func (m *WorkspaceModel) wheelAtEdge(msg tea.MouseMsg) bool {
+	p, ok := m.paneAt(msg.X, msg.Y)
+	if !ok {
+		return true
+	}
+	vp := m.paneViewport(p)
+	if msg.Button == tea.MouseButtonWheelUp {
+		return vp.AtTop()
+	}
+	return vp.AtBottom()
+}
+
 func (m *WorkspaceModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	p, ok := m.paneAt(msg.X, msg.Y)
 	if !ok {
