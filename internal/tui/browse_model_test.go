@@ -25,6 +25,15 @@ type fakeBrowseData struct {
 	daily          DailyInfo
 	dailyErr       error
 	dailyCalls     int
+
+	// position persistence: initSource/initSlug seed what LoadPosition returns
+	// (simulating a remembered previous session); saved* record what the model
+	// writes back via SavePosition.
+	initSource  string
+	initSlug    string
+	savedSource string
+	savedSlug   string
+	saveCalls   int
 }
 
 func (f *fakeBrowseData) ListProblems(context.Context) ([]BrowseRow, error) { return f.rows, nil }
@@ -53,6 +62,14 @@ func (f *fakeBrowseData) PlanSlugs(_ context.Context, ref PlanRef) ([]string, er
 func (f *fakeBrowseData) Daily(context.Context) (DailyInfo, error) {
 	f.dailyCalls++
 	return f.daily, f.dailyErr
+}
+func (f *fakeBrowseData) LoadPosition(context.Context) (string, string) {
+	return f.initSource, f.initSlug
+}
+func (f *fakeBrowseData) SavePosition(_ context.Context, sourceKey, slug string) error {
+	f.saveCalls++
+	f.savedSource, f.savedSlug = sourceKey, slug
+	return nil
 }
 
 func newFakeData() *fakeBrowseData {

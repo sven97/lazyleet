@@ -119,6 +119,19 @@ func (b *browseData) SyncProgress(ctx context.Context) (int, error) {
 	return fetchAndCacheProgress(ctx, client, b.db)
 }
 
+func (b *browseData) LoadPosition(ctx context.Context) (sourceKey, slug string) {
+	sourceKey, _, _ = b.db.GetMeta(ctx, store.MetaBrowseSource)
+	slug, _, _ = b.db.GetMeta(ctx, store.MetaBrowseSlug)
+	return sourceKey, slug
+}
+
+func (b *browseData) SavePosition(ctx context.Context, sourceKey, slug string) error {
+	if err := b.db.SetMeta(ctx, store.MetaBrowseSource, sourceKey); err != nil {
+		return err
+	}
+	return b.db.SetMeta(ctx, store.MetaBrowseSlug, slug)
+}
+
 func (b *browseData) Daily(ctx context.Context) (tui.DailyInfo, error) {
 	client, err := b.app.newClient()
 	if err != nil {

@@ -11,6 +11,8 @@ import (
 // Meta keys used by the app. Keep them here so callers don't hard-code strings.
 const (
 	MetaProgressSyncedAt = "progress_synced_at" // unix seconds; last user solve-status refresh
+	MetaBrowseSource     = "browse_source"      // last active source: "all" | "daily" | "plan:<slug>"
+	MetaBrowseSlug       = "browse_slug"        // last selected problem in that source
 )
 
 // SetMeta upserts a key/value pair in the meta scratch table.

@@ -6,7 +6,8 @@ runner and one-key submit — in your own editor.
 
 > **Status: early development.** Working now: browse mode (`lazyleet`)
 > — a sources sidebar, a fuzzy-filterable problem list, study plans with
-> progress, and a live statement preview, all read from a local SQLite cache;
+> progress, and a live statement preview, all read from a local SQLite cache,
+> and it reopens on whatever source and problem you had selected last time;
 > and the coding workspace — statement + live solution mirror + local Python
 > test runner, plus `R` run / `s` submit on LeetCode (with `lazyleet auth`) and
 > `i` to import a failing case as a local test.

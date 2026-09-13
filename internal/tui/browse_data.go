@@ -79,4 +79,11 @@ type BrowseData interface {
 	PlanSlugs(ctx context.Context, ref PlanRef) ([]string, error)
 	// Daily returns today's daily challenge and the user's streak.
 	Daily(ctx context.Context) (DailyInfo, error)
+	// LoadPosition returns the source and problem selected when browse mode was
+	// last closed, so the next launch can resume there. sourceKey is "" when
+	// nothing has been remembered yet.
+	LoadPosition(ctx context.Context) (sourceKey, slug string)
+	// SavePosition remembers the active source and selected problem.
+	// Best-effort: called on every settle, so a failure isn't worth surfacing.
+	SavePosition(ctx context.Context, sourceKey, slug string) error
 }

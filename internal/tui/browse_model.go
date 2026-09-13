@@ -49,11 +49,17 @@ type BrowseModel struct {
 	zoom              bool
 	showHelp          bool
 
-	allRows   []BrowseRow
-	sources   []sourceItem
-	srcCursor int
-	activeSrc int
-	planCache map[string][]string
+	allRows     []BrowseRow
+	sources     []sourceItem
+	srcCursor   int
+	activeSrc   int
+	planCache   map[string][]string
+	plansLoaded bool // plansLoadedMsg has landed at least once
+
+	// pendingRestore is the source+problem remembered from the previous
+	// session; set once from positionLoadedMsg, cleared once applied (or given
+	// up on) by attemptRestore. See attemptRestore for the whole flow.
+	pendingRestore *browseRestore
 
 	view     []BrowseRow
 	haystack []string
@@ -160,7 +166,25 @@ func NewBrowseModel(data BrowseData) *BrowseModel {
 }
 
 func (m *BrowseModel) Init() tea.Cmd {
-	return tea.Batch(m.spin.Tick, m.loadProblems(), m.loadPlans(), m.loadAuth(), m.loadDaily())
+	return tea.Batch(m.spin.Tick, m.loadProblems(), m.loadPlans(), m.loadAuth(), m.loadDaily(), m.loadPosition())
+}
+
+// browseRestore is the source+problem remembered from the previous session.
+type browseRestore struct {
+	sourceKey string
+	slug      string
+}
+
+type positionLoadedMsg struct {
+	sourceKey string
+	slug      string
+}
+
+func (m *BrowseModel) loadPosition() tea.Cmd {
+	return func() tea.Msg {
+		src, slug := m.data.LoadPosition(context.Background())
+		return positionLoadedMsg{sourceKey: src, slug: slug}
+	}
 }
 
 type authLoadedMsg struct{ a AuthState }
@@ -304,7 +328,18 @@ func (m *BrowseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.progressSync = msg.progressSync
 		}
 		m.rebuildView()
-		return m, tea.Batch(m.debouncePreview(), m.maybeSyncProgress())
+		// attemptRestore may move the cursor (e.g. onto a remembered problem);
+		// call it before debouncePreview so the debounce captures where the
+		// cursor actually ends up, not row 0.
+		restoreCmd := m.attemptRestore()
+		return m, tea.Batch(restoreCmd, m.debouncePreview(), m.maybeSyncProgress())
+
+	case positionLoadedMsg:
+		if msg.sourceKey != "" {
+			m.pendingRestore = &browseRestore{sourceKey: msg.sourceKey, slug: msg.slug}
+		}
+		restoreCmd := m.attemptRestore()
+		return m, tea.Batch(restoreCmd, m.debouncePreview())
 
 	case authLoadedMsg:
 		m.auth = msg.a
@@ -338,8 +373,10 @@ func (m *BrowseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		for _, p := range msg.plans {
 			m.sources = append(m.sources, sourceItem{label: p.Name, kind: srcPlan, plan: p})
 		}
+		m.plansLoaded = true
 		m.relayout() // the Sources pane is sized to the source count
-		return m, m.refreshDetail()
+		restoreCmd := m.attemptRestore()
+		return m, tea.Batch(restoreCmd, m.refreshDetail())
 
 	case planSlugsMsg:
 		if msg.err != nil {
@@ -349,11 +386,15 @@ func (m *BrowseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.planCache[msg.slug] = msg.slugs
 		if m.activeSourceIsPlan(msg.slug) {
 			m.rebuildView()
-			return m, m.debouncePreview()
+			restoreCmd := m.attemptRestore()
+			return m, tea.Batch(restoreCmd, m.debouncePreview())
 		}
 		return m, nil
 
 	case previewDebounceMsg:
+		if msg.slug == m.currentSlug() {
+			m.savePosition()
+		}
 		if msg.slug == m.currentSlug() && msg.slug != m.previewSlug {
 			if m.previewCancel != nil {
 				m.previewCancel() // abandon the previous load
@@ -545,6 +586,7 @@ func (m *BrowseModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			if idx == m.cursor { // second click on the selected row → open
 				if s := m.currentSlug(); s != "" {
 					m.Chosen = s
+					m.savePosition()
 					return m, tea.Quit
 				}
 			}
@@ -583,6 +625,7 @@ func (m *BrowseModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch {
 	case key.Matches(msg, m.keys.Quit):
+		m.savePosition()
 		return m, tea.Quit
 	case key.Matches(msg, m.keys.Help):
 		m.showHelp = !m.showHelp
@@ -704,6 +747,94 @@ func (m *BrowseModel) activeSourceKind() int {
 	return m.sources[m.activeSrc].kind
 }
 
+// sourceKey encodes the active source as the stable string BrowseData persists:
+// "all", "daily", or "plan:<slug>". sourceIndexForKey is its inverse.
+func (m *BrowseModel) sourceKey() string {
+	switch m.activeSourceKind() {
+	case srcDaily:
+		return "daily"
+	case srcPlan:
+		if m.activeSrc >= 0 && m.activeSrc < len(m.sources) {
+			return "plan:" + m.sources[m.activeSrc].plan.Slug
+		}
+	}
+	return "all"
+}
+
+// sourceIndexForKey finds the source matching a key sourceKey produced, or -1
+// if it no longer exists (e.g. a since-removed study plan).
+func (m *BrowseModel) sourceIndexForKey(key string) int {
+	planSlug, isPlan := strings.CutPrefix(key, "plan:")
+	for i, s := range m.sources {
+		switch {
+		case key == "all" && s.kind == srcAll:
+			return i
+		case key == "daily" && s.kind == srcDaily:
+			return i
+		case isPlan && s.kind == srcPlan && s.plan.Slug == planSlug:
+			return i
+		}
+	}
+	return -1
+}
+
+// savePosition remembers the active source and selected problem so the next
+// launch can resume here. Best-effort: a local, low-stakes write, not worth
+// surfacing a failure for.
+func (m *BrowseModel) savePosition() {
+	_ = m.data.SavePosition(context.Background(), m.sourceKey(), m.currentSlug())
+}
+
+// attemptRestore applies a source+problem remembered from a previous session,
+// once whatever it needs has actually loaded: the catalog always; for a study
+// plan, the plan list (to find its index) and then that plan's slugs (to know
+// where in it the remembered problem sits). It's cheap to call from every
+// message handler that might have just made progress possible — it no-ops
+// until pendingRestore is set and ready, and clears it once applied (or once
+// the remembered source turns out to be gone).
+func (m *BrowseModel) attemptRestore() tea.Cmd {
+	r := m.pendingRestore
+	if r == nil || len(m.allRows) == 0 {
+		return nil
+	}
+	if strings.HasPrefix(r.sourceKey, "plan:") && !m.plansLoaded {
+		return nil // wait for the plan list itself
+	}
+	idx := m.sourceIndexForKey(r.sourceKey)
+	if idx < 0 {
+		m.pendingRestore = nil // remembered source is gone — quietly give up
+		return nil
+	}
+	var cmd tea.Cmd
+	if idx != m.activeSrc {
+		cmd = m.activateSource(idx)
+	}
+	if slug, ok := strings.CutPrefix(r.sourceKey, "plan:"); ok {
+		if _, cached := m.planCache[slug]; !cached {
+			return cmd // that plan's slugs haven't loaded — selectSlug on planSlugsMsg
+		}
+	}
+	m.selectSlug(r.slug)
+	m.pendingRestore = nil
+	return cmd
+}
+
+// selectSlug moves the cursor to slug within the current filtered view, if
+// it's present there. A no-op (never a crash) when it isn't — e.g. the daily
+// source only ever holds today's problem, not whatever was daily last time.
+func (m *BrowseModel) selectSlug(slug string) {
+	if slug == "" {
+		return
+	}
+	for i, fi := range m.filtered {
+		if m.view[fi].Slug == slug {
+			m.cursor = i
+			m.clampCursor()
+			return
+		}
+	}
+}
+
 // dailyRow returns the problem row for today's daily challenge, preferring the
 // catalog row (carries solve status, AC%, tags) and falling back to a row
 // synthesised from DailyInfo when the catalog doesn't have it.
@@ -737,6 +868,7 @@ func (m *BrowseModel) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.Open):
 		if s := m.currentSlug(); s != "" {
 			m.Chosen = s
+			m.savePosition()
 			return m, tea.Quit
 		}
 		return m, nil
