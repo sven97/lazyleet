@@ -36,6 +36,20 @@ archives:
 checksum:
   name_template: checksums.txt
 
+brews:
+  - name: lazyleet
+    repository:
+      owner: sven97
+      name: homebrew-tap
+    directory: Formula
+    homepage: "https://github.com/sven97/lazyleet"
+    description: "Lazygit-style terminal UI for practising on LeetCode"
+    license: "MIT"
+    install: |
+      bin.install "lazyleet"
+    test: |
+      system "#{bin}/lazyleet", "--version"
+
 release:
   github:
     owner: sven97

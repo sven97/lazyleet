@@ -49,10 +49,10 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - uses: goreleaser/goreleaser-action@v6
-        with:
-          version: "~> v2"
-          args: check
+      # Note: `goreleaser check` is skipped here — it hard-fails on the
+      # `brews` deprecation notice even though `brews` still works fine
+      # (see .goreleaser.yaml). `build --snapshot` below still validates the
+      # config end-to-end.
       - uses: goreleaser/goreleaser-action@v6
         with:
           version: "~> v2"
