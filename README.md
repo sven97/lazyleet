@@ -40,33 +40,33 @@ otherwise do through a lot of clicking.
 ╭────────────────────────────────────╮╭────────────────────────────────────────────────────────────╮
 │Status                              ││1. Two Sum                                                  │
 │· anonymous  ·  com                 ││                                                            │
-│4055 problems · synced 5m ago       ││   1. Two Sum                                               │
-│○ daily · not done                  ││                                                            │
-╰────────────────────────────────────╯│  Given an array of integers  nums  and an integer          │
-╭────────────────────────────────────╮│  target , return indices of the two numbers such that      │
-│Sources                             ││  they add up to  target .                                  │
-│PROBLEMS                            ││                                                            │
-│● All Problems                      ││  You may assume that each input would have exactly         │
-│  Daily Question                    ││  one solution, and you may not use the same element        │
-│                                    ││  twice.                                                    │
+│4055 problems · synced 14m ago      ││  Given an array of integers  nums  and an integer          │
+│○ daily · not done                  ││  target , return indices of the two numbers such that      │
+╰────────────────────────────────────╯│  they add up to  target .                                  │
+╭────────────────────────────────────╮│                                                            │
+│Sources                             ││  You may assume that each input would have exactly         │
+│PROBLEMS                            ││  one solution, and you may not use the same element        │
+│● All Problems                      ││  twice.                                                    │
+│  Daily Question                    ││                                                            │
+│                                    ││  You can return the answer in any order.                   │
 │STUDY PLANS                         ││                                                            │
-│  lazyleet Starter 10               ││  You can return the answer in any order.                   │
+│  lazyleet Starter 10               ││  ## Example 1                                              │
 │  LeetCode 75                       ││                                                            │
-│  Top Interview 150                 ││  ## Example 1                                              │
-│  Top 100 Liked                     ││                                                            │
-╰────────────────────────────────────╯│    Input:  nums = [2,7,11,15], target = 9                  │
-╭────────────────────────────────────╮│    Output: [0,1]                                           │
-│Problems  (4055)                    ││    Explanation: nums[0] + nums[1] == 9, so we return       │
-│       # Dif    AC%  Title          ││  [0, 1].                                                   │
+│  Top Interview 150                 ││    Input:  nums = [2,7,11,15], target = 9                  │
+│  Top 100 Liked                     ││    Output: [0,1]                                           │
+╰────────────────────────────────────╯│    Explanation: nums[0] + nums[1] == 9, so we return       │
+╭────────────────────────────────────╮│  [0, 1].                                                   │
+│Problems  (4055)                    ││                                                            │
+│       # Dif    AC%  Title          ││  ## Example 2                                              │
 │·     1 E    58.2%  Two Sum         ││                                                            │
-│·     2 M    49.3%  Add Two Numbers ││  ## Example 2                                              │
-│·     3 M    40.0%  Longest Substri…││                                                            │
-│·     4 H    47.6%  Median of Two S…││    Input:  nums = [3,2,4], target = 6                      │
-│·     5 M    38.7%  Longest Palindr…││    Output: [1,2]                                           │
+│·     2 M    49.3%  Add Two Numbers ││    Input:  nums = [3,2,4], target = 6                      │
+│·     3 M    40.0%  Longest Substri…││    Output: [1,2]                                           │
+│·     4 H    47.6%  Median of Two S…││                                                            │
+│·     5 M    38.7%  Longest Palindr…││  ## Example 3                                              │
 │·     6 M    55.1%  Zigzag Conversi…││                                                            │
-│·     7 M    32.5%  Reverse Integer ││  ## Example 3                                              │
-│·     8 M    21.7%  String to Integ…││                                                            │
-│·     9 E    61.0%  Palindrome Numb…││    Input:  nums = [3,3], target = 6                        │
+│·     7 M    32.5%  Reverse Integer ││    Input:  nums = [3,3], target = 6                        │
+│·     8 M    21.7%  String to Integ…││    Output: [0,1]                                           │
+│·     9 E    61.0%  Palindrome Numb…││                                                            │
 ╰────────────────────────────────────╯╰────────────────────────────────────────────────────────────╯
 ↵ open workspace │ / fuzzy filter │ d/f/p filter │ S cycle sort │ tab next pane │ s sync │ ? help │…
 ```
@@ -77,33 +77,31 @@ otherwise do through a lot of clicking.
 ╭──────────────────────────────────────────╮╭──────────────────────────────────────────────────────╮
 │Two Sum  Easy                             ││solution.py                                           │
 │                                          ││1 class Solution:                                     │
-│   1. Two Sum                             ││2     def twoSum(self, nums: List[int], target: int) -│
-│                                          ││3         seen = {}                                   │
-│  Given an array of integers  nums        ││4         for i, n in enumerate(nums):                │
-│  and an integer  target , return         ││5             if target - n in seen:                  │
-│  indices of the two numbers such         ││6                 return [seen[target - n], i]        │
-│  that they add up to  target .           ││7             seen[n] = i                             │
-│                                          ││                                                      │
-│  You may assume that each input          ││                                                      │
+│  Given an array of integers  nums        ││2     def twoSum(self, nums: List[int], target: int) -│
+│  and an integer  target , return         ││3         seen = {}                                   │
+│  indices of the two numbers such         ││4         for i, n in enumerate(nums):                │
+│  that they add up to  target .           ││5             if target - n in seen:                  │
+│                                          ││6                 return [seen[target - n], i]        │
+│  You may assume that each input          ││7             seen[n] = i                             │
 │  would have exactly one solution,        ││                                                      │
 │  and you may not use the same            ││                                                      │
 │  element twice.                          ││                                                      │
 │                                          ││                                                      │
 │  You can return the answer in any        ││                                                      │
 │  order.                                  ││                                                      │
-│                                          │╰──────────────────────────────────────────────────────╯
-│  ## Example 1                            │╭──────────────────────────────────────────────────────╮
-│                                          ││Results                                               │
-│    Input:  nums = [2,7,11,15],           ││✓ 3/3 passed  ·  55ms                                 │
-│  target = 9                              ││                                                      │
-│    Output: [0,1]                         ││✓ case 1  0.0ms                                       │
-│    Explanation: nums[0] + nums[1]        ││  in   [2,7,11,15], 9                                 │
-│  == 9, so we return [0, 1].              ││  out  [0, 1]                                         │
 │                                          ││                                                      │
-│  ## Example 2                            ││✓ case 2  0.0ms                                       │
-│                                          ││  in   [3,2,4], 6                                     │
-│    Input:  nums = [3,2,4], target =      ││  out  [1, 2]                                         │
-│  6                                       ││                                                      │
+│  ## Example 1                            │╰──────────────────────────────────────────────────────╯
+│                                          │╭──────────────────────────────────────────────────────╮
+│    Input:  nums = [2,7,11,15],           ││Results                                               │
+│  target = 9                              ││✓ 3/3 passed  ·  88ms                                 │
+│    Output: [0,1]                         ││                                                      │
+│    Explanation: nums[0] + nums[1]        ││✓ case 1  0.0ms                                       │
+│  == 9, so we return [0, 1].              ││  in   [2,7,11,15], 9                                 │
+│                                          ││  out  [0, 1]                                         │
+│  ## Example 2                            ││                                                      │
+│                                          ││✓ case 2  0.0ms                                       │
+│    Input:  nums = [3,2,4], target =      ││  in   [3,2,4], 6                                     │
+│  6                                       ││  out  [1, 2]                                         │
 ╰──────────────────────────────────────────╯╰──────────────────────────────────────────────────────╯
 e edit │ r run local │ R run @LC │ s submit │ tab next pane │ z zoom │ b back │ q quit
 ```
