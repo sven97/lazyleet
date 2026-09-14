@@ -26,9 +26,7 @@ var fixtures = map[string]Question{
 		Slug:       "two-sum",
 		Title:      "Two Sum",
 		Difficulty: "Easy",
-		Statement: `# 1. Two Sum
-
-Given an array of integers ` + "`nums`" + ` and an integer ` + "`target`" + `, return
+		Statement: `Given an array of integers ` + "`nums`" + ` and an integer ` + "`target`" + `, return
 *indices of the two numbers such that they add up to* ` + "`target`" + `.
 
 You may assume that each input would have **exactly one solution**, and you
