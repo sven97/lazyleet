@@ -16,20 +16,26 @@ func TestEqualOutputsExact(t *testing.T) {
 	}
 }
 
-func TestEqualOutputsOrderInsensitiveArray(t *testing.T) {
+func TestEqualOutputsArrayOrderSensitive(t *testing.T) {
 	meta := leetcode.Meta{Return: leetcode.MetaType{Type: "integer[]"}}
-	if !EqualOutputs("[0,1]", "[1,0]", meta) {
-		t.Fatal("two-sum style any-order pair should match")
+	if !EqualOutputs("[0,1]", "[0,1]", meta) {
+		t.Fatal("identical arrays should match")
+	}
+	if EqualOutputs("[0,1]", "[1,0]", meta) {
+		t.Fatal("reordered array should not match: local judge must not pass answers the real judge would reject")
 	}
 	if EqualOutputs("[0,1]", "[0,2]", meta) {
-		t.Fatal("different multiset should not match")
+		t.Fatal("different elements should not match")
 	}
 }
 
-func TestEqualOutputsNestedOrderInsensitive(t *testing.T) {
+func TestEqualOutputsNestedArrayOrderSensitive(t *testing.T) {
 	meta := leetcode.Meta{Return: leetcode.MetaType{Type: "list<list<integer>>"}}
-	if !EqualOutputs("[[1,2],[3]]", "[[3],[2,1]]", meta) {
-		t.Fatal("subsets-style nested any-order should match")
+	if !EqualOutputs("[[1,2],[3]]", "[[1,2],[3]]", meta) {
+		t.Fatal("identical nested arrays should match")
+	}
+	if EqualOutputs("[[1,2],[3]]", "[[3],[2,1]]", meta) {
+		t.Fatal("reordered nested array should not match")
 	}
 }
 

@@ -159,7 +159,7 @@ func TestForLanguages(t *testing.T) {
 	}
 }
 
-func TestOrderInsensitiveViaPython(t *testing.T) {
+func TestOrderSensitiveViaPython(t *testing.T) {
 	r := requireRunner(t, "python3")
 	sol := writeLangSolution(t, "solution.py", `
 class Solution:
@@ -173,7 +173,7 @@ class Solution:
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if !res.OK() {
-		t.Fatalf("order-insensitive compare should pass, got %+v", res.Cases)
+	if res.OK() {
+		t.Fatalf("reversed-order array should fail the local judge, got %+v", res.Cases)
 	}
 }

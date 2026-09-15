@@ -1,8 +1,8 @@
 // Package runner is lazyleet's local judge: it wraps the user's solution,
 // feeds it each test case in a sandboxed subprocess, and compares the output.
 //
-// Drivers: python3/python, javascript, golang, java, cpp. Comparison supports
-// order-insensitive arrays and float tolerance (see EqualOutputs). Design
+// Drivers: python3/python, javascript, golang, java, cpp. Comparison is
+// order-sensitive with float tolerance (see EqualOutputs). Design
 // problems (empty Meta.Name) return a clear unsupported BuildErr.
 package runner
 
@@ -34,8 +34,16 @@ type Spec struct {
 	Timeout      time.Duration // per whole run; 0 -> DefaultTimeout
 }
 
-// DefaultTimeout applies when Spec.Timeout is zero.
+// DefaultTimeout applies when Spec.Timeout is zero. It bounds only case
+// execution; the compiled-language drivers (cpp/java/golang) give the
+// compile step its own separate budget (CompileTimeout) so a slow build
+// can't eat into the run budget and report a correct, fast solution as a
+// spurious timeout.
 const DefaultTimeout = 10 * time.Second
+
+// CompileTimeout bounds the compile step for cpp/java/golang, independent of
+// the run timeout above.
+const CompileTimeout = 20 * time.Second
 
 // CaseResult is the outcome for a single case.
 type CaseResult struct {

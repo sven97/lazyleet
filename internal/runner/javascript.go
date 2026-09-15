@@ -65,6 +65,7 @@ func (j javascriptRunner) Run(ctx context.Context, spec Spec) (Result, error) {
 const jsHarness = `
 const fs = require("fs");
 const vm = require("vm");
+const util = require("util");
 const data = JSON.parse(fs.readFileSync(0, "utf8"));
 const entry = data.entry;
 
@@ -72,8 +73,23 @@ function emit(obj) {
   process.stdout.write(JSON.stringify(obj));
 }
 
+// The final result is a single JSON blob on real stdout, so any console.log
+// the user's solution makes must be captured per-case instead of reaching the
+// real stdout, or it would corrupt that blob.
+let capturedOut = null;
+function captureConsole(...args) {
+  if (capturedOut !== null) capturedOut.text += util.format(...args) + "\n";
+}
+const sandboxConsole = {
+  log: captureConsole,
+  info: captureConsole,
+  warn: captureConsole,
+  error: captureConsole,
+  debug: captureConsole,
+};
+
 const sandbox = {
-  console,
+  console: sandboxConsole,
   module: { exports: {} },
   exports: {},
   require,
@@ -132,15 +148,21 @@ for (let i = 0; i < data.cases.length; i++) {
     continue;
   }
   const t0 = process.hrtime.bigint();
+  const buf = { text: "" };
+  capturedOut = buf;
   try {
     const actual = fn(...args);
     entry_out.elapsed_ms = Number(process.hrtime.bigint() - t0) / 1e6;
+    entry_out.stdout = buf.text;
     entry_out.actual = JSON.stringify(actual === undefined ? null : actual);
     entry_out.status = "ran";
   } catch (e) {
     entry_out.elapsed_ms = Number(process.hrtime.bigint() - t0) / 1e6;
+    entry_out.stdout = buf.text;
     entry_out.status = "error";
     entry_out.err = String(e && e.message || e);
+  } finally {
+    capturedOut = null;
   }
   results.push(entry_out);
 }

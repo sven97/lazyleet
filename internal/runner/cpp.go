@@ -1,7 +1,6 @@
 package runner
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -9,7 +8,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/sven97/lazyleet/internal/leetcode"
 	"github.com/sven97/lazyleet/internal/testcase"
@@ -35,58 +33,18 @@ func (c cppRunner) Run(ctx context.Context, spec Spec) (Result, error) {
 		return Result{BuildErr: err.Error()}, nil
 	}
 
-	dir, err := os.MkdirTemp("", "lazyleet-cpp-*")
-	if err != nil {
-		return Result{}, err
-	}
-	defer os.RemoveAll(dir)
-
-	srcPath := filepath.Join(dir, "main.cpp")
-	if err := os.WriteFile(srcPath, []byte(harness), 0o644); err != nil {
-		return Result{}, err
-	}
-	binPath := filepath.Join(dir, "solution")
-
-	timeout := spec.Timeout
-	if timeout <= 0 {
-		timeout = DefaultTimeout
-	}
-	runCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	build := exec.CommandContext(runCtx, "g++", "-std=c++17", "-O2", "-o", binPath, srcPath)
-	var buildOut bytes.Buffer
-	build.Stderr = &buildOut
-	build.Stdout = &buildOut
-	if err := build.Run(); err != nil {
-		if runCtx.Err() == context.DeadlineExceeded {
-			return timedOut(spec, timeout), nil
-		}
-		msg := strings.TrimSpace(buildOut.String())
-		if msg == "" {
-			msg = err.Error()
-		}
-		return Result{BuildErr: msg}, nil
-	}
-
-	cmd := exec.CommandContext(runCtx, binPath)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	start := time.Now()
-	runErr := cmd.Run()
-	elapsed := time.Since(start)
-	if runCtx.Err() == context.DeadlineExceeded {
-		return timedOut(spec, elapsed), nil
-	}
-	if runErr != nil && stdout.Len() == 0 {
-		return Result{BuildErr: trimErr(stderr.String(), runErr)}, nil
-	}
-	var out harnessOut
-	if err := json.Unmarshal(stdout.Bytes(), &out); err != nil {
-		return Result{BuildErr: fmt.Sprintf("runner: unreadable harness output: %v\n%s", err, stderr.String())}, nil
-	}
-	return judgeHarness(spec, elapsed, out), nil
+	return runCompiled(ctx, spec, "lazyleet-cpp-*",
+		func(dir string) error {
+			return os.WriteFile(filepath.Join(dir, "main.cpp"), []byte(harness), 0o644)
+		},
+		func(ctx context.Context, dir string) *exec.Cmd {
+			return exec.CommandContext(ctx, "g++", "-std=c++17", "-O2",
+				"-o", filepath.Join(dir, "solution"), filepath.Join(dir, "main.cpp"))
+		},
+		func(ctx context.Context, dir string) *exec.Cmd {
+			return exec.CommandContext(ctx, filepath.Join(dir, "solution"))
+		},
+	)
 }
 
 func buildCppHarness(meta leetcode.Meta, userSrc string, cases []testcase.Case) (string, error) {
@@ -103,7 +61,7 @@ func buildCppHarness(meta leetcode.Meta, userSrc string, cases []testcase.Case) 
 	}
 
 	var b strings.Builder
-	b.WriteString("#include <bits/stdc++.h>\nusing namespace std;\n\n")
+	b.WriteString(cppStdIncludes)
 	b.WriteString(userSrc)
 	b.WriteString("\n\n")
 	b.WriteString(cppJSONHelpers)
@@ -118,6 +76,8 @@ func buildCppHarness(meta leetcode.Meta, userSrc string, cases []testcase.Case) 
 		b.WriteString("    auto t0 = chrono::steady_clock::now();\n")
 		b.WriteString(fmt.Sprintf("    int index = %d;\n", i))
 		b.WriteString("    string status = \"ran\"; string actual; string err;\n")
+		b.WriteString("    ostringstream outCapture;\n")
+		b.WriteString("    streambuf* origCoutBuf = cout.rdbuf(outCapture.rdbuf());\n")
 		b.WriteString("    try {\n")
 		args := make([]string, len(meta.Params))
 		for pi := range meta.Params {
@@ -139,11 +99,13 @@ func buildCppHarness(meta leetcode.Meta, userSrc string, cases []testcase.Case) 
 		b.WriteString("    } catch (...) {\n")
 		b.WriteString("      status = \"error\"; err = \"unknown error\";\n")
 		b.WriteString("    }\n")
+		b.WriteString("    cout.rdbuf(origCoutBuf);\n")
+		b.WriteString("    string capturedStdout = outCapture.str();\n")
 		b.WriteString("    double ms = chrono::duration<double, milli>(chrono::steady_clock::now() - t0).count();\n")
 		b.WriteString("    cout << \"{\\\"index\\\":\" << index")
 		b.WriteString(" << \",\\\"status\\\":\\\"\" << status << \"\\\"\"")
 		b.WriteString(" << \",\\\"actual\\\":\" << json_string(actual)")
-		b.WriteString(" << \",\\\"stdout\\\":\\\"\\\"\"")
+		b.WriteString(" << \",\\\"stdout\\\":\" << json_string(capturedStdout)")
 		b.WriteString(" << \",\\\"err\\\":\" << json_string(err)")
 		b.WriteString(" << \",\\\"elapsed_ms\\\":\" << ms << \"}\";\n")
 		b.WriteString("  }\n")
@@ -157,7 +119,9 @@ func cppLiteral(cppType, raw string) (string, error) {
 	raw = strings.TrimSpace(raw)
 	ct := strings.TrimSpace(cppType)
 	switch {
-	case ct == "int" || ct == "long long" || ct == "double" || ct == "bool" || ct == "char":
+	case ct == "char":
+		return cppCharLiteral(raw)
+	case ct == "int" || ct == "long long" || ct == "double" || ct == "bool":
 		if ct == "long long" && !strings.Contains(strings.ToLower(raw), "ll") {
 			return raw + "LL", nil
 		}
@@ -173,6 +137,35 @@ func cppLiteral(cppType, raw string) (string, error) {
 	default:
 		return "", fmt.Errorf("cannot build C++ literal for type %s", cppType)
 	}
+}
+
+// cppCharLiteral turns the JSON string value LeetCode uses for a `character`
+// test-case argument (e.g. `"a"`) into a C++ char literal (e.g. 'a').
+func cppCharLiteral(raw string) (string, error) {
+	var s string
+	if err := json.Unmarshal([]byte(raw), &s); err != nil {
+		return "", fmt.Errorf("parse char: %w", err)
+	}
+	rs := []rune(s)
+	if len(rs) != 1 {
+		return "", fmt.Errorf("expected single-character string for char literal, got %q", s)
+	}
+	var esc string
+	switch rs[0] {
+	case '\\':
+		esc = `\\`
+	case '\'':
+		esc = `\'`
+	case '\n':
+		esc = `\n`
+	case '\r':
+		esc = `\r`
+	case '\t':
+		esc = `\t`
+	default:
+		esc = string(rs[0])
+	}
+	return "'" + esc + "'", nil
 }
 
 func cppVectorLiteral(cppType, raw string) (string, error) {
@@ -195,6 +188,36 @@ func cppVectorLiteral(cppType, raw string) (string, error) {
 	}
 	return fmt.Sprintf("%s{%s}", cppType, strings.Join(parts, ",")), nil
 }
+
+// cppStdIncludes replaces <bits/stdc++.h>, a GCC/libstdc++-only umbrella
+// header LeetCode's own judge can get away with but a local build can't
+// portably rely on — it doesn't exist under Clang/libc++ (the default on
+// macOS, where it fails with "file not found") or MSVC. This explicit list
+// covers what LeetCode-style solutions commonly reach for.
+const cppStdIncludes = `#include <algorithm>
+#include <bitset>
+#include <chrono>
+#include <cmath>
+#include <cstdint>
+#include <deque>
+#include <functional>
+#include <iostream>
+#include <limits>
+#include <list>
+#include <map>
+#include <numeric>
+#include <queue>
+#include <set>
+#include <sstream>
+#include <stack>
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
+#include <vector>
+using namespace std;
+
+`
 
 const cppJSONHelpers = `
 static string json_escape(const string& s) {

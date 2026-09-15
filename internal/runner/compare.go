@@ -13,25 +13,27 @@ import (
 // matching LeetCode's typical 1e-5 allowance.
 const floatTol = 1e-5
 
-// EqualOutputs reports whether actual matches expected for a problem with the
-// given meta. Comparison rules:
+// EqualOutputs reports whether actual matches expected. Comparison rules:
 //
 //   - literals are JSON-decoded when possible; otherwise trimmed strings must match
 //   - numbers compare with float tolerance (covers both ints-as-floats and floats)
-//   - array/list return types compare order-insensitively (multiset equality),
-//     which covers "return in any order" problems such as Two Sum and subsets
-//   - nested arrays apply the same rule at each level
+//   - arrays compare element-by-element, in order
 //
-// Multiple distinct valid answers that are not permutations of one another are
-// not yet modeled; use a single canonical expected output in testcases.jsonl.
+// meta is accepted for callers' convenience (and future per-problem rules)
+// but unused today: LeetCode's metadata doesn't tell us which problems
+// accept "any order" answers (e.g. Subsets, Combination Sum), so we judge
+// order-sensitively across the board. A correct order-insensitive answer may
+// show as a local fail, but we never want a wrong-order answer to show as a
+// local pass when the real judge would reject it. Multiple distinct valid
+// answers that are not identical are not yet modeled; use a single canonical
+// expected output in testcases.jsonl.
 func EqualOutputs(expected, actual string, meta leetcode.Meta) bool {
 	ev, eOK := decodeLiteral(expected)
 	av, aOK := decodeLiteral(actual)
 	if !eOK || !aOK {
 		return strings.TrimSpace(expected) == strings.TrimSpace(actual)
 	}
-	orderInsensitive := isArrayLike(meta.Return.Type)
-	return deepEqual(ev, av, orderInsensitive)
+	return deepEqual(ev, av)
 }
 
 func decodeLiteral(s string) (any, bool) {
@@ -46,18 +48,7 @@ func decodeLiteral(s string) (any, bool) {
 	return v, true
 }
 
-func isArrayLike(t string) bool {
-	t = strings.TrimSpace(strings.ToLower(t))
-	if t == "" {
-		return false
-	}
-	return strings.Contains(t, "[]") ||
-		strings.HasPrefix(t, "list<") ||
-		strings.HasPrefix(t, "vector<") ||
-		t == "list" || t == "array"
-}
-
-func deepEqual(a, b any, orderInsensitive bool) bool {
+func deepEqual(a, b any) bool {
 	switch av := a.(type) {
 	case nil:
 		return b == nil
@@ -77,19 +68,11 @@ func deepEqual(a, b any, orderInsensitive bool) bool {
 		return numEqual(f, b)
 	case []any:
 		bv, ok := b.([]any)
-		if !ok {
-			return false
-		}
-		if orderInsensitive {
-			return equalMultisets(av, bv)
-		}
-		if len(av) != len(bv) {
+		if !ok || len(av) != len(bv) {
 			return false
 		}
 		for i := range av {
-			// Nested arrays stay order-insensitive when the top-level return is
-			// an array type (subsets / combinations).
-			if !deepEqual(av[i], bv[i], orderInsensitive) {
+			if !deepEqual(av[i], bv[i]) {
 				return false
 			}
 		}
@@ -100,7 +83,7 @@ func deepEqual(a, b any, orderInsensitive bool) bool {
 			return false
 		}
 		for k, v := range av {
-			if !deepEqual(v, bv[k], orderInsensitive) {
+			if !deepEqual(v, bv[k]) {
 				return false
 			}
 		}
@@ -142,28 +125,4 @@ func asFloat(v any) (float64, bool) {
 	default:
 		return 0, false
 	}
-}
-
-func equalMultisets(a, b []any) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	used := make([]bool, len(b))
-	for _, x := range a {
-		found := false
-		for j, y := range b {
-			if used[j] {
-				continue
-			}
-			if deepEqual(x, y, true) {
-				used[j] = true
-				found = true
-				break
-			}
-		}
-		if !found {
-			return false
-		}
-	}
-	return true
 }

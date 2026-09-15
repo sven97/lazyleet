@@ -1,8 +1,12 @@
 package runner
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -101,4 +105,74 @@ func marshalPayload(spec Spec, source string) ([]byte, error) {
 		in.Cases = append(in.Cases, payloadCase{In: c.In, Out: c.Out})
 	}
 	return json.Marshal(in)
+}
+
+// runCompiled is the shared shape behind the cpp/java/golang drivers: write
+// the harness source into a fresh temp dir, compile it under its own
+// CompileTimeout (independent of the run timeout, so a slow build can't eat
+// into the case-execution budget), then run the built program and judge its
+// output. Only source layout and the exact build/run commands differ between
+// languages, so those are the only things callers need to supply.
+func runCompiled(
+	ctx context.Context,
+	spec Spec,
+	tempDirPattern string,
+	writeSources func(dir string) error,
+	buildCmd func(ctx context.Context, dir string) *exec.Cmd,
+	runCmd func(ctx context.Context, dir string) *exec.Cmd,
+) (Result, error) {
+	dir, err := os.MkdirTemp("", tempDirPattern)
+	if err != nil {
+		return Result{}, err
+	}
+	defer os.RemoveAll(dir)
+
+	if err := writeSources(dir); err != nil {
+		return Result{}, err
+	}
+
+	timeout := spec.Timeout
+	if timeout <= 0 {
+		timeout = DefaultTimeout
+	}
+
+	buildCtx, buildCancel := context.WithTimeout(ctx, CompileTimeout)
+	defer buildCancel()
+
+	build := buildCmd(buildCtx, dir)
+	var buildOut bytes.Buffer
+	build.Stderr = &buildOut
+	build.Stdout = &buildOut
+	if err := build.Run(); err != nil {
+		if buildCtx.Err() == context.DeadlineExceeded {
+			return timedOut(spec, CompileTimeout), nil
+		}
+		msg := strings.TrimSpace(buildOut.String())
+		if msg == "" {
+			msg = err.Error()
+		}
+		return Result{BuildErr: msg}, nil
+	}
+
+	runCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	cmd := runCmd(runCtx, dir)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	start := time.Now()
+	runErr := cmd.Run()
+	elapsed := time.Since(start)
+	if runCtx.Err() == context.DeadlineExceeded {
+		return timedOut(spec, elapsed), nil
+	}
+	if runErr != nil && stdout.Len() == 0 {
+		return Result{BuildErr: trimErr(stderr.String(), runErr)}, nil
+	}
+	var out harnessOut
+	if err := json.Unmarshal(stdout.Bytes(), &out); err != nil {
+		return Result{BuildErr: fmt.Sprintf("runner: unreadable harness output: %v\n%s", err, stderr.String())}, nil
+	}
+	return judgeHarness(spec, elapsed, out), nil
 }

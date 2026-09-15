@@ -1,7 +1,6 @@
 package runner
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -9,7 +8,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/sven97/lazyleet/internal/leetcode"
 	"github.com/sven97/lazyleet/internal/testcase"
@@ -35,59 +33,19 @@ func (g golangRunner) Run(ctx context.Context, spec Spec) (Result, error) {
 		return Result{BuildErr: err.Error()}, nil
 	}
 
-	dir, err := os.MkdirTemp("", "lazyleet-go-*")
-	if err != nil {
-		return Result{}, err
-	}
-	defer os.RemoveAll(dir)
-
-	mainPath := filepath.Join(dir, "main.go")
-	if err := os.WriteFile(mainPath, []byte(mainSrc), 0o644); err != nil {
-		return Result{}, err
-	}
-	binPath := filepath.Join(dir, "solution")
-
-	timeout := spec.Timeout
-	if timeout <= 0 {
-		timeout = DefaultTimeout
-	}
-	runCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	build := exec.CommandContext(runCtx, "go", "build", "-o", binPath, mainPath)
-	build.Dir = dir
-	var buildOut bytes.Buffer
-	build.Stderr = &buildOut
-	build.Stdout = &buildOut
-	if err := build.Run(); err != nil {
-		if runCtx.Err() == context.DeadlineExceeded {
-			return timedOut(spec, timeout), nil
-		}
-		msg := strings.TrimSpace(buildOut.String())
-		if msg == "" {
-			msg = err.Error()
-		}
-		return Result{BuildErr: msg}, nil
-	}
-
-	cmd := exec.CommandContext(runCtx, binPath)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	start := time.Now()
-	runErr := cmd.Run()
-	elapsed := time.Since(start)
-	if runCtx.Err() == context.DeadlineExceeded {
-		return timedOut(spec, elapsed), nil
-	}
-	if runErr != nil && stdout.Len() == 0 {
-		return Result{BuildErr: trimErr(stderr.String(), runErr)}, nil
-	}
-	var out harnessOut
-	if err := json.Unmarshal(stdout.Bytes(), &out); err != nil {
-		return Result{BuildErr: fmt.Sprintf("runner: unreadable harness output: %v\n%s", err, stderr.String())}, nil
-	}
-	return judgeHarness(spec, elapsed, out), nil
+	return runCompiled(ctx, spec, "lazyleet-go-*",
+		func(dir string) error {
+			return os.WriteFile(filepath.Join(dir, "main.go"), []byte(mainSrc), 0o644)
+		},
+		func(ctx context.Context, dir string) *exec.Cmd {
+			cmd := exec.CommandContext(ctx, "go", "build", "-o", filepath.Join(dir, "solution"), filepath.Join(dir, "main.go"))
+			cmd.Dir = dir
+			return cmd
+		},
+		func(ctx context.Context, dir string) *exec.Cmd {
+			return exec.CommandContext(ctx, filepath.Join(dir, "solution"))
+		},
+	)
 }
 
 func buildGoHarness(meta leetcode.Meta, userSrc string, cases []testcase.Case) (string, error) {
@@ -106,9 +64,23 @@ func buildGoHarness(meta leetcode.Meta, userSrc string, cases []testcase.Case) (
 
 	var b strings.Builder
 	b.WriteString("package main\n")
-	b.WriteString("import (\n\t\"encoding/json\"\n\t\"fmt\"\n\t\"os\"\n\t\"time\"\n)\n")
+	b.WriteString("import (\n\t\"encoding/json\"\n\t\"fmt\"\n\t\"io\"\n\t\"os\"\n\t\"time\"\n)\n")
 	b.WriteString(userSrc)
 	b.WriteString("\n\n")
+	// captureStdout swaps os.Stdout for a pipe while fn runs, so any
+	// fmt.Println in the user's solution doesn't corrupt the single JSON
+	// result blob this harness writes to the real stdout at the end.
+	b.WriteString("func captureStdout(fn func()) (out string) {\n")
+	b.WriteString("\told := os.Stdout\n")
+	b.WriteString("\tr, w, perr := os.Pipe()\n")
+	b.WriteString("\tif perr != nil {\n\t\tfn()\n\t\treturn \"\"\n\t}\n")
+	b.WriteString("\tos.Stdout = w\n")
+	b.WriteString("\tdone := make(chan string, 1)\n")
+	b.WriteString("\tgo func() {\n\t\tbuf, _ := io.ReadAll(r)\n\t\tdone <- string(buf)\n\t}()\n")
+	b.WriteString("\tdefer func() {\n\t\tos.Stdout = old\n\t\tw.Close()\n\t\tout = <-done\n\t}()\n")
+	b.WriteString("\tfn()\n")
+	b.WriteString("\treturn\n")
+	b.WriteString("}\n\n")
 	b.WriteString("func main() {\n")
 	b.WriteString("\ttype caseOut struct {\n")
 	b.WriteString("\t\tIndex int `json:\"index\"`\n")
@@ -133,18 +105,36 @@ func buildGoHarness(meta leetcode.Meta, userSrc string, cases []testcase.Case) (
 			if pi >= len(c.In) {
 				return "", fmt.Errorf("case %d: missing arg %d", i, pi)
 			}
-			b.WriteString(fmt.Sprintf("\t\t\tvar arg%d %s\n", pi, paramTypes[pi]))
 			lit, err := quoteJSONString(c.In[pi])
 			if err != nil {
 				return "", err
 			}
-			b.WriteString(fmt.Sprintf("\t\t\tif err := json.Unmarshal([]byte(%s), &arg%d); err != nil { co.Status = \"error\"; co.Err = err.Error(); co.ElapsedMS = float64(time.Since(t0).Microseconds()) / 1000.0; results = append(results, co); return }\n", lit, pi))
+			// LeetCode encodes a `character` test-case value as a one-rune JSON
+			// string (e.g. "a"). Go's json package cannot unmarshal a JSON
+			// string directly into a numeric type (byte/[]byte), so decode into
+			// a string first and pull the byte(s) out of it.
+			ptype := normalizeLCType(meta.Params[pi].Type)
+			switch ptype {
+			case "character", "char":
+				b.WriteString(fmt.Sprintf("\t\t\tvar arg%dStr string\n", pi))
+				b.WriteString(fmt.Sprintf("\t\t\tif err := json.Unmarshal([]byte(%s), &arg%dStr); err != nil { co.Status = \"error\"; co.Err = err.Error(); co.ElapsedMS = float64(time.Since(t0).Microseconds()) / 1000.0; results = append(results, co); return }\n", lit, pi))
+				b.WriteString(fmt.Sprintf("\t\t\targ%d := arg%dStr[0]\n", pi, pi))
+			case "character[]", "char[]":
+				b.WriteString(fmt.Sprintf("\t\t\tvar arg%dStrs []string\n", pi))
+				b.WriteString(fmt.Sprintf("\t\t\tif err := json.Unmarshal([]byte(%s), &arg%dStrs); err != nil { co.Status = \"error\"; co.Err = err.Error(); co.ElapsedMS = float64(time.Since(t0).Microseconds()) / 1000.0; results = append(results, co); return }\n", lit, pi))
+				b.WriteString(fmt.Sprintf("\t\t\targ%d := make([]byte, len(arg%dStrs))\n", pi, pi))
+				b.WriteString(fmt.Sprintf("\t\t\tfor _i, _s := range arg%dStrs { arg%d[_i] = _s[0] }\n", pi, pi))
+			default:
+				b.WriteString(fmt.Sprintf("\t\t\tvar arg%d %s\n", pi, paramTypes[pi]))
+				b.WriteString(fmt.Sprintf("\t\t\tif err := json.Unmarshal([]byte(%s), &arg%d); err != nil { co.Status = \"error\"; co.Err = err.Error(); co.ElapsedMS = float64(time.Since(t0).Microseconds()) / 1000.0; results = append(results, co); return }\n", lit, pi))
+			}
 		}
 		args := make([]string, len(meta.Params))
 		for pi := range meta.Params {
 			args[pi] = fmt.Sprintf("arg%d", pi)
 		}
-		b.WriteString(fmt.Sprintf("\t\t\tvar actual %s = %s(%s)\n", retType, meta.Name, strings.Join(args, ", ")))
+		b.WriteString(fmt.Sprintf("\t\t\tvar actual %s\n", retType))
+		b.WriteString(fmt.Sprintf("\t\t\tco.Stdout = captureStdout(func() { actual = %s(%s) })\n", meta.Name, strings.Join(args, ", ")))
 		b.WriteString("\t\t\tenc, err := json.Marshal(actual)\n")
 		b.WriteString("\t\t\tif err != nil { co.Status = \"error\"; co.Err = err.Error(); co.ElapsedMS = float64(time.Since(t0).Microseconds()) / 1000.0; results = append(results, co); return }\n")
 		b.WriteString("\t\t\tco.Actual = string(enc)\n")

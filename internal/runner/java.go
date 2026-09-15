@@ -1,7 +1,6 @@
 package runner
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -9,7 +8,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/sven97/lazyleet/internal/leetcode"
 	"github.com/sven97/lazyleet/internal/testcase"
@@ -36,60 +34,22 @@ func (j javaRunner) Run(ctx context.Context, spec Spec) (Result, error) {
 		return Result{BuildErr: err.Error()}, nil
 	}
 
-	dir, err := os.MkdirTemp("", "lazyleet-java-*")
-	if err != nil {
-		return Result{}, err
-	}
-	defer os.RemoveAll(dir)
-
-	if err := os.WriteFile(filepath.Join(dir, "Solution.java"), src, 0o644); err != nil {
-		return Result{}, err
-	}
-	if err := os.WriteFile(filepath.Join(dir, "Harness.java"), []byte(harness), 0o644); err != nil {
-		return Result{}, err
-	}
-
-	timeout := spec.Timeout
-	if timeout <= 0 {
-		timeout = DefaultTimeout
-	}
-	runCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	build := exec.CommandContext(runCtx, "javac", "Solution.java", "Harness.java")
-	build.Dir = dir
-	var buildOut bytes.Buffer
-	build.Stderr = &buildOut
-	build.Stdout = &buildOut
-	if err := build.Run(); err != nil {
-		if runCtx.Err() == context.DeadlineExceeded {
-			return timedOut(spec, timeout), nil
-		}
-		msg := strings.TrimSpace(buildOut.String())
-		if msg == "" {
-			msg = err.Error()
-		}
-		return Result{BuildErr: msg}, nil
-	}
-
-	cmd := exec.CommandContext(runCtx, "java", "-cp", dir, "Harness")
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	start := time.Now()
-	runErr := cmd.Run()
-	elapsed := time.Since(start)
-	if runCtx.Err() == context.DeadlineExceeded {
-		return timedOut(spec, elapsed), nil
-	}
-	if runErr != nil && stdout.Len() == 0 {
-		return Result{BuildErr: trimErr(stderr.String(), runErr)}, nil
-	}
-	var out harnessOut
-	if err := json.Unmarshal(stdout.Bytes(), &out); err != nil {
-		return Result{BuildErr: fmt.Sprintf("runner: unreadable harness output: %v\n%s", err, stderr.String())}, nil
-	}
-	return judgeHarness(spec, elapsed, out), nil
+	return runCompiled(ctx, spec, "lazyleet-java-*",
+		func(dir string) error {
+			if err := os.WriteFile(filepath.Join(dir, "Solution.java"), src, 0o644); err != nil {
+				return err
+			}
+			return os.WriteFile(filepath.Join(dir, "Harness.java"), []byte(harness), 0o644)
+		},
+		func(ctx context.Context, dir string) *exec.Cmd {
+			cmd := exec.CommandContext(ctx, "javac", "Solution.java", "Harness.java")
+			cmd.Dir = dir
+			return cmd
+		},
+		func(ctx context.Context, dir string) *exec.Cmd {
+			return exec.CommandContext(ctx, "java", "-cp", dir, "Harness")
+		},
+	)
 }
 
 func buildJavaHarness(meta leetcode.Meta, cases []testcase.Case) (string, error) {
@@ -121,6 +81,9 @@ func buildJavaHarness(meta leetcode.Meta, cases []testcase.Case) (string, error)
 		b.WriteString("      long t0 = System.nanoTime();\n")
 		b.WriteString(fmt.Sprintf("      int index = %d;\n", i))
 		b.WriteString("      String status = \"ran\"; String actual = \"\"; String err = \"\";\n")
+		b.WriteString("      java.io.PrintStream origOut = System.out;\n")
+		b.WriteString("      java.io.ByteArrayOutputStream capBuf = new java.io.ByteArrayOutputStream();\n")
+		b.WriteString("      System.setOut(new java.io.PrintStream(capBuf, true));\n")
 		b.WriteString("      try {\n")
 		args := make([]string, len(meta.Params))
 		for pi := range meta.Params {
@@ -138,12 +101,15 @@ func buildJavaHarness(meta leetcode.Meta, cases []testcase.Case) (string, error)
 		b.WriteString("        actual = toJson(got);\n")
 		b.WriteString("      } catch (Throwable e) {\n")
 		b.WriteString("        status = \"error\"; err = e.toString();\n")
+		b.WriteString("      } finally {\n")
+		b.WriteString("        System.setOut(origOut);\n")
 		b.WriteString("      }\n")
+		b.WriteString("      String stdout = capBuf.toString();\n")
 		b.WriteString("      double ms = (System.nanoTime() - t0) / 1e6;\n")
 		b.WriteString("      sb.append(\"{\\\"index\\\":\" + index")
 		b.WriteString(" + \",\\\"status\\\":\\\"\" + status + \"\\\"\"")
 		b.WriteString(" + \",\\\"actual\\\":\" + jsonString(actual)")
-		b.WriteString(" + \",\\\"stdout\\\":\\\"\\\"\"")
+		b.WriteString(" + \",\\\"stdout\\\":\" + jsonString(stdout)")
 		b.WriteString(" + \",\\\"err\\\":\" + jsonString(err)")
 		b.WriteString(" + \",\\\"elapsed_ms\\\":\" + ms + \"}\");\n")
 		b.WriteString("    }\n")
@@ -161,12 +127,11 @@ func javaLiteral(javaType, raw string) (string, error) {
 	raw = strings.TrimSpace(raw)
 	jt := strings.ReplaceAll(javaType, " ", "")
 	switch {
-	case jt == "int" || jt == "long" || jt == "double" || jt == "boolean" || jt == "char":
+	case jt == "char":
+		return javaCharLiteral(raw)
+	case jt == "int" || jt == "long" || jt == "double" || jt == "boolean":
 		if jt == "long" && !strings.HasSuffix(strings.ToUpper(raw), "L") {
 			return raw + "L", nil
-		}
-		if jt == "char" {
-			return raw, nil // "\"a\"" style from JSON? LC uses "a" as string often
 		}
 		return raw, nil
 	case jt == "String":
@@ -183,6 +148,35 @@ func javaLiteral(javaType, raw string) (string, error) {
 	default:
 		return "", fmt.Errorf("cannot build Java literal for type %s", javaType)
 	}
+}
+
+// javaCharLiteral turns the JSON string value LeetCode uses for a `character`
+// test-case argument (e.g. `"a"`) into a Java char literal (e.g. 'a').
+func javaCharLiteral(raw string) (string, error) {
+	var s string
+	if err := json.Unmarshal([]byte(raw), &s); err != nil {
+		return "", fmt.Errorf("parse char: %w", err)
+	}
+	rs := []rune(s)
+	if len(rs) != 1 {
+		return "", fmt.Errorf("expected single-character string for char literal, got %q", s)
+	}
+	var esc string
+	switch rs[0] {
+	case '\\':
+		esc = `\\`
+	case '\'':
+		esc = `\'`
+	case '\n':
+		esc = `\n`
+	case '\r':
+		esc = `\r`
+	case '\t':
+		esc = `\t`
+	default:
+		esc = string(rs[0])
+	}
+	return "'" + esc + "'", nil
 }
 
 func javaArrayLiteral(javaType, raw string) (string, error) {
