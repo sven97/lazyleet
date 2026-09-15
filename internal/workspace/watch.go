@@ -11,10 +11,11 @@ import (
 // watching the file inode directly misses saves) and filters events down to the
 // solution file's name.
 type Watcher struct {
-	fs     *fsnotify.Watcher
-	target string        // absolute path of the solution file
-	Events chan struct{} // one signal per relevant change; coalescing is the caller's job
-	done   chan struct{}
+	fs       *fsnotify.Watcher
+	target   string        // absolute path of the solution file
+	Events   chan struct{} // one signal per relevant change; coalescing is the caller's job
+	done     chan struct{}
+	loopDone chan struct{} // closed once loop() has returned
 }
 
 // Watch starts watching the directory containing solutionPath.
@@ -33,16 +34,18 @@ func Watch(solutionPath string) (*Watcher, error) {
 	}
 
 	w := &Watcher{
-		fs:     fw,
-		target: abs,
-		Events: make(chan struct{}, 1),
-		done:   make(chan struct{}),
+		fs:       fw,
+		target:   abs,
+		Events:   make(chan struct{}, 1),
+		done:     make(chan struct{}),
+		loopDone: make(chan struct{}),
 	}
 	go w.loop()
 	return w, nil
 }
 
 func (w *Watcher) loop() {
+	defer close(w.loopDone)
 	for {
 		select {
 		case <-w.done:
@@ -71,8 +74,13 @@ func (w *Watcher) loop() {
 	}
 }
 
-// Close stops watching.
+// Close stops watching. It blocks until loop() has fully exited before
+// closing Events, so a caller blocked on <-w.Events (e.g. a Bubble Tea
+// command already in flight) always wakes up instead of leaking forever.
 func (w *Watcher) Close() error {
 	close(w.done)
-	return w.fs.Close()
+	err := w.fs.Close()
+	<-w.loopDone
+	close(w.Events)
+	return err
 }

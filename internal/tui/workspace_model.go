@@ -217,8 +217,19 @@ func allowedImageHost(rawURL string) bool {
 }
 
 func (m *WorkspaceModel) waitForFileChange() tea.Cmd {
+	if m.watcher == nil {
+		return nil
+	}
+	// Snapshot the channel now, synchronously, rather than reading m.watcher
+	// inside the returned closure: Close() runs on the Update goroutine and
+	// may nil out m.watcher before the tea runtime gets around to invoking
+	// this command, which would otherwise nil-deref.
+	events := m.watcher.Events
 	return func() tea.Msg {
-		<-m.watcher.Events
+		if _, ok := <-events; !ok {
+			// Watcher was closed (workspace torn down); don't re-arm.
+			return nil
+		}
 		return fileChangedMsg{}
 	}
 }
