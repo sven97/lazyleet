@@ -169,10 +169,25 @@ LeetCode (no login required for public problems; results are cached afterwards).
 
 In the workspace: `e` edit in `$EDITOR` · `r` run local tests · `R` run on
 LeetCode · `s` submit · `i` import the last failing case · `tab` switch pane ·
-`j`/`k` scroll · `z` zoom · `q` back. Saving the solution file (from `$EDITOR`
-or any other editor) re-runs the local tests automatically. `R`/`s` need
-`lazyleet auth`. The workspace lives at
+`j`/`k` scroll · `z` zoom · `b`/`q` back to browse. Saving the solution file
+(from `$EDITOR` or any other editor) re-runs the local tests automatically.
+`R`/`s` need `lazyleet auth`. The workspace lives at
 `$XDG_DATA_HOME/lazyleet/workspace/<id>-<slug>/`.
+
+### Local judge languages
+
+| Language | Local `r` | Notes |
+|----------|-----------|--------|
+| `python3` / `python` | yes | needs `python3` on PATH |
+| `javascript` | yes | needs `node` on PATH |
+| `golang` | yes | needs `go` on PATH |
+| `java` | yes | needs `javac` + `java` on PATH |
+| `cpp` | yes | needs `g++` on PATH |
+| `typescript`, `c`, `rust`, … | remote only | scaffold works; use `R` / `s` |
+
+Design problems (LRU Cache-style class/method sequences) are not run locally
+yet — the results pane shows a clear unsupported message instead of a false
+fail. Array returns compare order-insensitively; floats allow a 1e-5 tolerance.
 
 ## Configuration
 
