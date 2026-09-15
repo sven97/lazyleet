@@ -475,6 +475,32 @@ func TestBrowseStatusPaneFlagsStaleSync(t *testing.T) {
 	}
 }
 
+func TestBrowseFooterOmitsSyncAgeWhenStatusPaneVisible(t *testing.T) {
+	m, f := bootBrowse(t) // wide window -> two-column layout, Status pane on screen
+	step(&m, browseLoadedMsg{rows: f.rows, lastSync: time.Now().Add(-48 * time.Hour)})
+	if m.layout.Single {
+		t.Fatal("a 150-wide window should use the two-column layout")
+	}
+
+	if bar := m.renderStatusBar(); strings.Contains(bar, "synced") {
+		t.Errorf("footer shouldn't repeat the Status pane's own sync info:\n%s", bar)
+	}
+
+	// Zoom onto the list: the Status pane is off-screen, so the footer is the
+	// only place left to see sync freshness — it should show up there instead.
+	step(&m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'z'}})
+	if !m.layout.Single {
+		t.Fatal("z should zoom to a single-pane layout")
+	}
+	bar := m.renderStatusBar()
+	if !strings.Contains(bar, "synced") {
+		t.Errorf("footer should show sync info once the Status pane is zoomed away:\n%s", bar)
+	}
+	if !strings.Contains(bar, "2d ago") {
+		t.Errorf("footer sync age wrong:\n%s", bar)
+	}
+}
+
 func TestStatusDetailBodyAnonymous(t *testing.T) {
 	m, _ := bootBrowse(t) // anonymous
 	body := m.statusDetailBody()

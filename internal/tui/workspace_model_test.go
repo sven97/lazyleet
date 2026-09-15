@@ -95,6 +95,41 @@ func TestWorkspaceModelZoomTogglesTabbed(t *testing.T) {
 	}
 }
 
+func TestWorkspaceHelpTogglesAndCloses(t *testing.T) {
+	m := newTestModel(t)
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 140, Height: 40})
+	m = updated.(*WorkspaceModel)
+
+	if strings.Contains(m.View(), "import the last failing case") {
+		t.Fatal("help shouldn't show before ? is pressed")
+	}
+
+	pressRune(&m, '?')
+	view := m.View()
+	for _, want := range []string{"import the last failing case", "toggle this help"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("help view missing %q:\n%s", want, view)
+		}
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = updated.(*WorkspaceModel)
+	if m.showHelp {
+		t.Fatal("esc should close help")
+	}
+}
+
+func TestWorkspaceStatusBarAdvertisesImport(t *testing.T) {
+	m := newTestModel(t)
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 140, Height: 40})
+	m = updated.(*WorkspaceModel)
+
+	bar := m.renderStatusBar()
+	if !strings.Contains(bar, "import") {
+		t.Errorf("status bar should advertise the import shortcut:\n%s", bar)
+	}
+}
+
 func pressRune(m **WorkspaceModel, r rune) tea.Cmd {
 	updated, cmd := (*m).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
 	*m = updated.(*WorkspaceModel)

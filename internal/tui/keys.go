@@ -59,8 +59,10 @@ func (k KeyMap) shortcutHints() []hint {
 		{k.Run.Help().Key, k.Run.Help().Desc},
 		{k.RunLC.Help().Key, k.RunLC.Help().Desc},
 		{k.Submit.Help().Key, k.Submit.Help().Desc},
+		{k.Import.Help().Key, "import"}, // full desc ("import failing case") is in `?` help
 		{k.NextPane.Help().Key, k.NextPane.Help().Desc},
 		{k.Zoom.Help().Key, k.Zoom.Help().Desc},
+		{k.Help.Help().Key, k.Help.Help().Desc},
 		{k.Back.Help().Key, k.Back.Help().Desc},
 		{k.Quit.Help().Key, k.Quit.Help().Desc},
 	}

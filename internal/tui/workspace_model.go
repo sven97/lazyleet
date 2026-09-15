@@ -73,6 +73,7 @@ type WorkspaceModel struct {
 
 	watcher   *workspace.Watcher
 	statusMsg string
+	showHelp  bool
 }
 
 type fileChangedMsg struct{}
@@ -405,6 +406,12 @@ func (m *WorkspaceModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.Back):
 		m.watcher.Close()
 		return m, tea.Quit // Phase 2: return to browse mode instead
+	case key.Matches(msg, m.keys.Help):
+		m.showHelp = !m.showHelp
+		return m, nil
+	case m.showHelp && msg.String() == "esc":
+		m.showHelp = false
+		return m, nil
 	case key.Matches(msg, m.keys.NextPane):
 		m.focused = m.focused.Next()
 		m.relayout()
@@ -634,6 +641,9 @@ func (m *WorkspaceModel) View() (out string) {
 	if !m.ready {
 		return "loading workspace…"
 	}
+	if m.showHelp {
+		return m.renderHelp()
+	}
 
 	var body string
 	if m.layout.Tabbed {
@@ -733,6 +743,31 @@ func (m *WorkspaceModel) renderStatusBar() string {
 		line = truncate(line, w)
 	}
 	return m.th.StatusBar.Width(w).Render(line)
+}
+
+// renderHelp is the full-screen reference shown while showHelp is set —
+// workspace mode has no other place a user can see the complete keymap: the
+// status bar only ever has room for the handful of most-used bindings.
+func (m *WorkspaceModel) renderHelp() string {
+	pairs := [][2]string{
+		{"↑/k ↓/j", "scroll the focused pane"},
+		{"ctrl+u / ctrl+d", "page up / down"},
+		{"tab / ⇧tab", "next / prev pane"},
+		{"z", "zoom the focused pane"},
+		{"e", "edit in $EDITOR"},
+		{"r", "run local tests"},
+		{"R", "run on LeetCode (needs `lazyleet auth`)"},
+		{"s", "submit to LeetCode (needs `lazyleet auth`)"},
+		{"i", "import the last failing case as a local test"},
+		{"b", "back"}, {"?", "toggle this help"}, {"q", "quit"},
+	}
+	var b strings.Builder
+	b.WriteString(m.th.TitleFocused.Render("lazyleet — workspace") + "\n\n")
+	for _, p := range pairs {
+		b.WriteString(fmt.Sprintf("  %s  %s\n", m.th.StatusKey.Render(fmt.Sprintf("%-16s", p[0])), p[1]))
+	}
+	b.WriteString("\n" + m.th.Muted.Render("press ? or esc to return"))
+	return b.String()
 }
 
 func extOf(path string) string {
