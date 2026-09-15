@@ -18,8 +18,12 @@ type RemoteOutcome struct {
 	Stdout     []string // captured prints, per case
 	Expected   []string
 	Actual     []string
-	CompileErr string
-	RuntimeErr string
+	// CompareResult is LeetCode's own per-case pass/fail bitmask ('1'/'0',
+	// one char per test case) — authoritative where present, unlike inferring
+	// failure by comparing Expected[i] == Actual[i] as strings.
+	CompareResult string
+	CompileErr    string
+	RuntimeErr    string
 }
 
 // RemoteJudge runs and submits code against LeetCode. The cmd layer implements

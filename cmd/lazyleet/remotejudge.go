@@ -74,20 +74,21 @@ func (r *remoteJudge) markSolved() {
 
 func mapOutcome(kind string, res leetcode.JudgeResult) tui.RemoteOutcome {
 	out := tui.RemoteOutcome{
-		Kind:       kind,
-		Verdict:    res.StatusMsg,
-		Passed:     res.TotalCorrect,
-		Total:      res.TotalTestcases,
-		Runtime:    res.StatusRuntime,
-		Memory:     res.StatusMemory,
-		RuntimePct: res.RuntimePercentile,
-		MemoryPct:  res.MemoryPercentile,
-		LastCase:   res.LastTestcase,
-		Stdout:     res.CodeOutput,
-		Expected:   res.ExpectedAnswer,
-		Actual:     res.CodeAnswer,
-		CompileErr: strings.TrimSpace(res.FullCompileError),
-		RuntimeErr: strings.TrimSpace(res.FullRuntimeError),
+		Kind:          kind,
+		Verdict:       res.StatusMsg,
+		Passed:        res.TotalCorrect,
+		Total:         res.TotalTestcases,
+		Runtime:       res.StatusRuntime,
+		Memory:        res.StatusMemory,
+		RuntimePct:    res.RuntimePercentile,
+		MemoryPct:     res.MemoryPercentile,
+		LastCase:      res.LastTestcase,
+		Stdout:        res.CodeOutput,
+		Expected:      res.ExpectedAnswer,
+		Actual:        res.CodeAnswer,
+		CompareResult: res.CompareResult,
+		CompileErr:    strings.TrimSpace(res.FullCompileError),
+		RuntimeErr:    strings.TrimSpace(res.FullRuntimeError),
 	}
 
 	if kind == "run" {

@@ -203,6 +203,13 @@ func renderRemote(th Theme, kind string, out *RemoteOutcome, err error, running 
 // a partial-fail run (e.g. 1 of 2 samples wrong) doesn't bury the one wrong
 // case inside a flat "exp 2 | 0" / "got 1 | 0" line the reader has to align
 // by hand, padded by a case that already passed.
+//
+// Which cases mismatch is decided from CompareResult (LeetCode's own
+// per-case '1'/'0' bitmask) when present — authoritative, and immune to a
+// case reading as "wrong" only because of incidental formatting differences
+// between Expected[i] and Actual[i]. Falls back to comparing the two slices
+// directly when CompareResult is absent (e.g. it may not accompany every
+// response shape).
 func renderCaseDiffs(th Theme, out *RemoteOutcome, width int) string {
 	n := len(out.Expected)
 	if len(out.Actual) < n {
@@ -211,10 +218,20 @@ func renderCaseDiffs(th Theme, out *RemoteOutcome, width int) string {
 	if out.Total > 0 && out.Total < n {
 		n = out.Total
 	}
+	if cr := out.CompareResult; cr != "" && len(cr) < n {
+		n = len(cr)
+	}
+
+	wrong := func(i int) bool {
+		if cr := out.CompareResult; i < len(cr) {
+			return cr[i] != '1'
+		}
+		return out.Expected[i] != out.Actual[i]
+	}
 
 	var b strings.Builder
 	for i := 0; i < n; i++ {
-		if out.Expected[i] == out.Actual[i] {
+		if !wrong(i) {
 			continue
 		}
 		if n > 1 {
