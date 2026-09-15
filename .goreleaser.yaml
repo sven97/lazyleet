@@ -43,7 +43,7 @@ brews:
       name: homebrew-tap
     directory: Formula
     homepage: "https://github.com/sven97/lazyleet"
-    description: "Lazygit-style terminal UI for practising on LeetCode"
+    description: "Practice LeetCode in the terminal, in your own editor"
     license: "MIT"
     install: |
       bin.install "lazyleet"
