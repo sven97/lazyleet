@@ -39,8 +39,8 @@ otherwise do through a lot of clicking.
 ```
 ╭────────────────────────────────────╮╭────────────────────────────────────────────────────────────╮
 │Status                              ││1. Two Sum                                                  │
-│· anonymous  ·  com                 ││                                                            │
-│4055 problems · synced 14m ago      ││  Given an array of integers  nums  and an integer          │
+│· anonymous                         ││                                                            │
+│4055 problems · synced 4h ago       ││  Given an array of integers  nums  and an integer          │
 │○ daily · not done                  ││  target , return indices of the two numbers such that      │
 ╰────────────────────────────────────╯│  they add up to  target .                                  │
 ╭────────────────────────────────────╮│                                                            │
