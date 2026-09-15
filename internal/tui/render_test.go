@@ -29,6 +29,51 @@ func TestTruncateRespectsDisplayWidth(t *testing.T) {
 	}
 }
 
+func TestRenderCaseDiffsShowsOnlyTheWrongCase(t *testing.T) {
+	th := DefaultTheme()
+	// 1 of 2 samples wrong, plus the trailing padding entry LeetCode's
+	// interpret responses have been seen to carry beyond TotalTestcases.
+	out := &RemoteOutcome{
+		Total:    2,
+		Expected: []string{"2", "0", ""},
+		Actual:   []string{"1", "0", ""},
+	}
+	got := renderCaseDiffs(th, out, 40)
+
+	if strings.Contains(got, "|") {
+		t.Errorf("padding entry leaked into the diff:\n%s", got)
+	}
+	if !strings.Contains(got, "case 1") {
+		t.Errorf("should label which case failed:\n%s", got)
+	}
+	if strings.Contains(got, "case 2") {
+		t.Errorf("case 2 passed and shouldn't be shown:\n%s", got)
+	}
+	if !strings.Contains(got, "2") || !strings.Contains(got, "1") {
+		t.Errorf("should show case 1's expected/actual values:\n%s", got)
+	}
+}
+
+func TestRenderCaseDiffsSingleCaseOmitsLabel(t *testing.T) {
+	th := DefaultTheme()
+	out := &RemoteOutcome{Total: 1, Expected: []string{"[0,1]"}, Actual: []string{"[1,0]"}}
+	got := renderCaseDiffs(th, out, 40)
+	if strings.Contains(got, "case 1") {
+		t.Errorf("a single-case diff doesn't need a case label:\n%s", got)
+	}
+	if !strings.Contains(got, "[0,1]") || !strings.Contains(got, "[1,0]") {
+		t.Errorf("missing expected/actual values:\n%s", got)
+	}
+}
+
+func TestRenderCaseDiffsAllPassingShowsNothing(t *testing.T) {
+	th := DefaultTheme()
+	out := &RemoteOutcome{Total: 2, Expected: []string{"2", "0"}, Actual: []string{"2", "0"}}
+	if got := renderCaseDiffs(th, out, 40); got != "" {
+		t.Errorf("no mismatched case should render nothing, got:\n%s", got)
+	}
+}
+
 func TestFormatRowNeverExceedsWidth(t *testing.T) {
 	m := &BrowseModel{th: DefaultTheme()}
 	rows := []BrowseRow{

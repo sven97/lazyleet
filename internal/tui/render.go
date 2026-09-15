@@ -189,9 +189,41 @@ func renderRemote(th Theme, kind string, out *RemoteOutcome, err error, running 
 		}
 		b.WriteString(th.Muted.Render("press i to import this case as a local test") + "\n")
 	}
-	if !out.Accepted && len(out.Expected) > 0 && len(out.Actual) > 0 {
-		b.WriteString("\n" + th.DiffAdd.Render("  exp  ") + truncate(strings.Join(out.Expected, " | "), width-7) + "\n")
-		b.WriteString(th.DiffDel.Render("  got  ") + truncate(strings.Join(out.Actual, " | "), width-7) + "\n")
+	if !out.Accepted {
+		b.WriteString(renderCaseDiffs(th, out, width))
+	}
+	return b.String()
+}
+
+// renderCaseDiffs formats the expected/actual mismatch for a failed remote
+// run or submission. LeetCode's Expected/Actual are index-aligned slices, one
+// entry per test case evaluated, not pre-filtered to the failing ones — and
+// have been observed to carry a trailing padding entry beyond TotalTestcases.
+// Clamp to Total (when known) and only show cases that actually mismatch, so
+// a partial-fail run (e.g. 1 of 2 samples wrong) doesn't bury the one wrong
+// case inside a flat "exp 2 | 0" / "got 1 | 0" line the reader has to align
+// by hand, padded by a case that already passed.
+func renderCaseDiffs(th Theme, out *RemoteOutcome, width int) string {
+	n := len(out.Expected)
+	if len(out.Actual) < n {
+		n = len(out.Actual)
+	}
+	if out.Total > 0 && out.Total < n {
+		n = out.Total
+	}
+
+	var b strings.Builder
+	for i := 0; i < n; i++ {
+		if out.Expected[i] == out.Actual[i] {
+			continue
+		}
+		if n > 1 {
+			b.WriteString("\n" + th.Muted.Render(fmt.Sprintf("case %d", i+1)) + "\n")
+		} else {
+			b.WriteString("\n")
+		}
+		b.WriteString(th.DiffAdd.Render("  exp  ") + truncate(out.Expected[i], width-7) + "\n")
+		b.WriteString(th.DiffDel.Render("  got  ") + truncate(out.Actual[i], width-7) + "\n")
 	}
 	return b.String()
 }
