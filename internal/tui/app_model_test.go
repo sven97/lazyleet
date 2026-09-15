@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -102,9 +101,9 @@ func TestAppModelOpenAndBackPreservesBrowseFilter(t *testing.T) {
 func TestAppModelQuitFromBrowseExits(t *testing.T) {
 	bm, _ := bootBrowse(t)
 	am := NewAppModel(bm, nil)
-	updated, cmd := am.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	updated, _ := am.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
 	am = updated.(*AppModel)
-	updated, cmd = am.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	updated, cmd := am.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
 	am = updated.(*AppModel)
 	if cmd == nil {
 		t.Fatal("expected quit cmd from browse")
@@ -113,7 +112,6 @@ func TestAppModelQuitFromBrowseExits(t *testing.T) {
 	if am.InWorkspace() {
 		t.Fatal("q from browse should not open workspace")
 	}
-	_ = strings.Contains
 }
 
 func TestWorkspaceBackStandaloneStillQuits(t *testing.T) {
@@ -121,7 +119,7 @@ func TestWorkspaceBackStandaloneStillQuits(t *testing.T) {
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 140, Height: 40})
 	m = updated.(*WorkspaceModel)
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
-	m = updated.(*WorkspaceModel)
+	_ = updated.(*WorkspaceModel)
 	if cmd == nil {
 		t.Fatal("standalone workspace back should quit")
 	}

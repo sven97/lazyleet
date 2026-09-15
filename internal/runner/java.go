@@ -118,7 +118,7 @@ func buildJavaHarness(meta leetcode.Meta, cases []testcase.Case) (string, error)
 	for i, c := range cases {
 		b.WriteString("    {\n")
 		b.WriteString("      if (!first) sb.append(\",\"); first = false;\n")
-		b.WriteString(fmt.Sprintf("      long t0 = System.nanoTime();\n"))
+		b.WriteString("      long t0 = System.nanoTime();\n")
 		b.WriteString(fmt.Sprintf("      int index = %d;\n", i))
 		b.WriteString("      String status = \"ran\"; String actual = \"\"; String err = \"\";\n")
 		b.WriteString("      try {\n")
