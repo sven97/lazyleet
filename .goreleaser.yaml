@@ -43,9 +43,11 @@ brews:
       name: homebrew-tap
       # A fine-grained PAT scoped to just homebrew-tap (Contents: Read &
       # Write) — the default GITHUB_TOKEN in Actions can't reach a different
-      # repo. Locally, falls back to GITHUB_TOKEN (your own `gh` login,
-      # which can already push anywhere you own) when the env var is unset.
-      token: "{{ if .Env.HOMEBREW_TAP_GITHUB_TOKEN }}{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}{{ else }}{{ .Env.GITHUB_TOKEN }}{{ end }}"
+      # repo. GoReleaser's token field only accepts a bare {{ .Env.VAR }}
+      # reference (no conditional templating), so for a manual local release
+      # export this env var too (e.g. to your own `gh auth token`) — see
+      # notes/RELEASE.md.
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     directory: Formula
     homepage: "https://github.com/sven97/lazyleet"
     description: "Practice LeetCode in the terminal, in your own editor"
