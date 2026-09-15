@@ -110,10 +110,21 @@ func (m *BrowseModel) sourcesBody(w int) string {
 	return b.String()
 }
 
-// statusPaneBody is the compact 2-line summary shown in the small left-top pane
-// (its rect is brStatusH tall: border + title + 2 lines).
+// staleSyncAfter is how old the full-catalog sync can get before the compact
+// Status pane flags it instead of showing it in the same muted style as a
+// fresh one — LeetCode adds problems continuously, so a silent multi-day-old
+// "N problems" count is misleading. Matches the default cache_ttl.
+const staleSyncAfter = 24 * time.Hour
+
+// statusPaneBody is the compact 3-line summary shown in the small left-top pane
+// (its rect is brStatusH tall: border + title + 3 body lines).
 func (m *BrowseModel) statusPaneBody(w int) string {
-	region := firstNonEmptyStr(m.auth.Region, "com")
+	// The region is almost always the "com" default, so it's only worth the
+	// space when it isn't — same rule statusDetailBody uses.
+	var regionSuffix string
+	if r := m.auth.Region; r != "" && r != "com" {
+		regionSuffix = "  ·  " + r
+	}
 
 	var line1 string
 	if m.auth.Authed {
@@ -121,20 +132,35 @@ func (m *BrowseModel) statusPaneBody(w int) string {
 		if m.auth.User != "" {
 			who = m.auth.User
 		}
-		line1 = m.th.Pass.Render("✓ ") + truncate(who+"  ·  "+region, w-2)
+		line1 = m.th.Pass.Render("✓ ") + truncate(who+regionSuffix, w-2)
 	} else {
-		line1 = m.th.Muted.Render(truncate("· anonymous  ·  "+region, w))
+		line1 = m.th.Muted.Render(truncate("· anonymous"+regionSuffix, w))
 	}
 
 	var line2 string
 	if len(m.allRows) == 0 {
 		line2 = m.th.ErrorText.Render("cache empty — press s to sync")
 	} else {
-		txt := fmt.Sprintf("%d problems", len(m.allRows))
-		if !m.lastSync.IsZero() {
-			txt += " · synced " + roughAge(time.Since(m.lastSync)) + " ago"
+		// Signed-in users get their own solved count leading the line — it's
+		// the one number this whole app is about, and otherwise never shows
+		// up outside a specific study plan. Anonymous users have no solved
+		// status to show, so fall back to the catalog size.
+		var txt string
+		if m.auth.Authed {
+			txt = fmt.Sprintf("%d/%d solved", m.solvedCount(), len(m.allRows))
+		} else {
+			txt = fmt.Sprintf("%d problems", len(m.allRows))
 		}
-		line2 = m.th.Muted.Render(truncate(txt, w))
+		style := m.th.Muted
+		if !m.lastSync.IsZero() {
+			age := time.Since(m.lastSync)
+			txt += " · synced " + roughAge(age) + " ago"
+			if age > staleSyncAfter {
+				txt += " · press s"
+				style = m.th.ErrorText
+			}
+		}
+		line2 = style.Render(truncate(txt, w))
 	}
 	return line1 + "\n" + line2 + "\n" + m.dailyStatusLine(w)
 }
@@ -154,7 +180,7 @@ func (m *BrowseModel) dailyStatusLine(w int) string {
 	}
 	txt := "daily · " + state
 	if m.daily.Streak > 0 {
-		txt += fmt.Sprintf(" · streak %d", m.daily.Streak)
+		txt += " · streak " + plural(m.daily.Streak, "day")
 	}
 	return mark + " " + m.th.Muted.Render(truncate(txt, w-2))
 }
@@ -272,13 +298,6 @@ func dataDir(a AuthState) string {
 		dir = "~" + dir[len(home):]
 	}
 	return dir
-}
-
-func firstNonEmptyStr(a, b string) string {
-	if a != "" {
-		return a
-	}
-	return b
 }
 
 func (m *BrowseModel) listTitle() string {

@@ -440,6 +440,41 @@ func TestStatusDetailBodyShowsAccountSyncsAndDaily(t *testing.T) {
 	}
 }
 
+func TestBrowseStatusPaneLeadsWithSolvedCountWhenAuthed(t *testing.T) {
+	f := newFakeData()
+	f.authed = true
+	f.rows[0].Status = "ac" // 1 of 3 solved
+
+	m := NewBrowseModel(f)
+	step(&m, tea.WindowSizeMsg{Width: 150, Height: 40})
+	step(&m, authLoadedMsg{a: AuthState{Authed: true, Region: "com"}})
+	step(&m, browseLoadedMsg{rows: f.rows, lastSync: time.Now().Add(-2 * time.Hour)})
+
+	got := m.statusPaneBody(40)
+	if !strings.Contains(got, "1/3 solved") {
+		t.Errorf("authed status pane should lead with solved count, got:\n%s", got)
+	}
+	if strings.Contains(got, "com") {
+		t.Errorf("the default region shouldn't take up space in the compact pane:\n%s", got)
+	}
+}
+
+func TestBrowseStatusPaneFlagsStaleSync(t *testing.T) {
+	m, f := bootBrowse(t) // anonymous
+	step(&m, browseLoadedMsg{rows: f.rows, lastSync: time.Now().Add(-48 * time.Hour)})
+
+	got := m.statusPaneBody(40)
+	if !strings.Contains(got, "press s") {
+		t.Errorf("a multi-day-old catalog sync should nudge a resync:\n%s", got)
+	}
+
+	fresh, ff := bootBrowse(t)
+	step(&fresh, browseLoadedMsg{rows: ff.rows, lastSync: time.Now().Add(-2 * time.Hour)})
+	if got := fresh.statusPaneBody(40); strings.Contains(got, "press s") {
+		t.Errorf("a fresh sync shouldn't be flagged:\n%s", got)
+	}
+}
+
 func TestStatusDetailBodyAnonymous(t *testing.T) {
 	m, _ := bootBrowse(t) // anonymous
 	body := m.statusDetailBody()
