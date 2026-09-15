@@ -138,9 +138,9 @@ func renderResults(th Theme, res *runner.Result, runErr error, running bool, spi
 }
 
 // renderRemote formats a LeetCode run/submit outcome for the Results pane.
-// arity is the solution function's parameter count, needed to split a Run
-// Code response's concatenated LastCase back into one input per case.
-func renderRemote(th Theme, kind string, out *RemoteOutcome, err error, running bool, spin string, width int, arity int) string {
+// sentCases is exactly what was sent as a Run Code request's data input
+// (ignored for "submit") — used to label each response case's input.
+func renderRemote(th Theme, kind string, out *RemoteOutcome, err error, running bool, spin string, width int, sentCases []testcase.Case) string {
 	verb := "running on LeetCode"
 	if kind == "submit" {
 		verb = "submitting to LeetCode"
@@ -195,7 +195,7 @@ func renderRemote(th Theme, kind string, out *RemoteOutcome, err error, running 
 		// examples, or whatever you gave it) — show all of them, input,
 		// expected, and actual, not just the one(s) that failed. That's what
 		// lets a "passed" result be checked rather than taken on faith.
-		b.WriteString(renderRunCases(th, out, arity, width))
+		b.WriteString(renderRunCases(th, out, sentCases, width))
 		if !out.Accepted && strings.TrimSpace(out.LastCase) != "" {
 			b.WriteString(th.Muted.Render("press i to import the failing case(s) as local tests") + "\n")
 		}
@@ -217,7 +217,12 @@ func renderRemote(th Theme, kind string, out *RemoteOutcome, err error, running 
 // expected, and actual, each marked pass/fail. Unlike Submit (up to hundreds
 // of hidden cases, only one of which — the first failure — is ever visible),
 // Run Code only ever covers a handful of cases you can see in full.
-func renderRunCases(th Theme, out *RemoteOutcome, arity int, width int) string {
+//
+// The input column comes from sentCases (what was actually sent), not from
+// parsing the response apart — LeetCode's last_testcase isn't reliably
+// populated for a Run Code request the way it is for a real submission's one
+// failing case, so there's often nothing there to parse.
+func renderRunCases(th Theme, out *RemoteOutcome, sentCases []testcase.Case, width int) string {
 	n := len(out.Expected)
 	if len(out.Actual) < n {
 		n = len(out.Actual)
@@ -232,15 +237,6 @@ func renderRunCases(th Theme, out *RemoteOutcome, arity int, width int) string {
 		return ""
 	}
 
-	var ins [][]string
-	if arity > 0 {
-		if cases, err := testcase.FromLeetCodeExample(out.LastCase, arity); err == nil && len(cases) >= n {
-			for _, c := range cases[:n] {
-				ins = append(ins, c.In)
-			}
-		}
-	}
-
 	wrong := func(i int) bool {
 		if cr := out.CompareResult; i < len(cr) {
 			return cr[i] != '1'
@@ -251,15 +247,17 @@ func renderRunCases(th Theme, out *RemoteOutcome, arity int, width int) string {
 	var b strings.Builder
 	for i := 0; i < n; i++ {
 		mark, label := th.Pass.Render("✓"), th.Muted.Render(fmt.Sprintf("case %d", i+1))
+		expStyle, gotStyle := th.Muted, th.Muted // matching values on a pass — no diff to highlight
 		if wrong(i) {
 			mark, label = th.Fail.Render("✗"), th.Fail.Render(fmt.Sprintf("case %d", i+1))
+			expStyle, gotStyle = th.DiffAdd, th.DiffDel
 		}
 		b.WriteString("\n" + mark + " " + label + "\n")
-		if i < len(ins) {
-			b.WriteString(th.Muted.Render("  in   ") + truncate(strings.Join(ins[i], ", "), width-7) + "\n")
+		if i < len(sentCases) {
+			b.WriteString(th.Muted.Render("  in   ") + truncate(strings.Join(sentCases[i].In, ", "), width-7) + "\n")
 		}
-		b.WriteString(th.DiffAdd.Render("  exp  ") + truncate(out.Expected[i], width-7) + "\n")
-		b.WriteString(th.DiffDel.Render("  got  ") + truncate(out.Actual[i], width-7) + "\n")
+		b.WriteString(expStyle.Render("  exp  ") + truncate(out.Expected[i], width-7) + "\n")
+		b.WriteString(gotStyle.Render("  got  ") + truncate(out.Actual[i], width-7) + "\n")
 	}
 	return b.String()
 }

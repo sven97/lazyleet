@@ -70,6 +70,13 @@ type WorkspaceModel struct {
 	remoteOut     *RemoteOutcome
 	remoteErr     error
 	showRemote    bool // Results pane is showing the remote outcome, not local
+	// remoteRunCases is exactly what was sent as a Run Code request's data
+	// input, captured at send time. Rendering pairs it with the response's
+	// Expected/Actual by index for the input column — reconstructing it by
+	// parsing the response back apart (LeetCode's last_testcase isn't
+	// reliably populated for a Run Code request the way it is for a real
+	// submission's one failing case) turned out not to work.
+	remoteRunCases []testcase.Case
 
 	watcher   *workspace.Watcher
 	statusMsg string
@@ -256,6 +263,9 @@ func (m *WorkspaceModel) startRemote(kind string) (tea.Model, tea.Cmd) {
 	m.remoteErr = nil
 	m.showRemote = true
 	m.statusMsg = ""
+	if kind == "run" {
+		m.remoteRunCases, _ = m.ws.ReadCases()
+	}
 	m.refreshResults()
 	return m, tea.Batch(m.remoteCmd(kind), m.spin.Tick)
 }
@@ -620,7 +630,7 @@ func (m *WorkspaceModel) refreshResults() {
 	}
 	var body string
 	if m.showRemote {
-		body = renderRemote(m.th, m.remoteKind, m.remoteOut, m.remoteErr, m.remoteRunning, m.spin.View(), m.results.Width, m.q.Meta.Arity())
+		body = renderRemote(m.th, m.remoteKind, m.remoteOut, m.remoteErr, m.remoteRunning, m.spin.View(), m.results.Width, m.remoteRunCases)
 	} else {
 		body = renderResults(m.th, m.lastRun, m.lastErr, m.running, m.spin.View(), m.results.Width)
 	}

@@ -192,6 +192,35 @@ func TestWorkspaceRemoteSubmitAcceptedRendersVerdict(t *testing.T) {
 	}
 }
 
+// TestWorkspaceRemoteRunShowsInputFromWhatWasSent guards a real bug: the
+// Results pane showed no "in" line at all for any case of a Run Code result,
+// because it tried to reconstruct inputs by parsing the response's LastCase
+// apart, and LeetCode doesn't reliably populate that field for a Run Code
+// request (only for a real submission's one failing case). The fix uses what
+// was actually sent (the local test-case file, read at send time) instead.
+func TestWorkspaceRemoteRunShowsInputFromWhatWasSent(t *testing.T) {
+	fr := &fakeRemote{
+		available: true,
+		run: RemoteOutcome{
+			Kind: "run", Verdict: "Wrong Answer (sample)", Total: 2,
+			// No LastCase — matches what a real Run Code response looks like.
+			Expected: []string{"[0,1]", "[1,2]"},
+			Actual:   []string{"[0,1]", "[9,9]"},
+		},
+	}
+	m := newTestModelWithRemote(t, fr)
+	m.Update(tea.WindowSizeMsg{Width: 140, Height: 40})
+
+	runCmd(&m, pressRune(&m, 'R'))
+
+	v := m.results.View()
+	for _, want := range []string{"[2,7,11,15], 9", "[3,2,4], 6"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("results pane missing input %q:\n%s", want, v)
+		}
+	}
+}
+
 func TestWorkspaceImportFailingCaseAppendsAndRuns(t *testing.T) {
 	fr := &fakeRemote{
 		available: true,
