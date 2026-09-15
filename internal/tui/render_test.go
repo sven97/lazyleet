@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/sven97/lazyleet/internal/runner"
 )
 
 func TestTruncateRespectsDisplayWidth(t *testing.T) {
@@ -71,6 +73,71 @@ func TestRenderCaseDiffsAllPassingShowsNothing(t *testing.T) {
 	out := &RemoteOutcome{Total: 2, Expected: []string{"2", "0"}, Actual: []string{"2", "0"}}
 	if got := renderCaseDiffs(th, out, 40); got != "" {
 		t.Errorf("no mismatched case should render nothing, got:\n%s", got)
+	}
+}
+
+func TestRenderResultsShowsExpectedAndActualOnAPass(t *testing.T) {
+	th := DefaultTheme()
+	res := &runner.Result{
+		Passed: 1, Total: 1,
+		Cases: []runner.CaseResult{
+			{Index: 0, Status: runner.StatusPass, Input: []string{"[2,7,11,15]", "9"}, Expected: "[0,1]", Actual: "[0,1]"},
+		},
+	}
+	got := renderResults(th, res, nil, false, "", 60)
+	if !strings.Contains(got, "[2,7,11,15]") {
+		t.Errorf("missing input:\n%s", got)
+	}
+	if strings.Count(got, "[0,1]") != 2 {
+		t.Errorf("a pass should show both expected and actual (equal, but both), got:\n%s", got)
+	}
+}
+
+func TestRenderRunCasesShowsInputExpectedAndActualForEveryCase(t *testing.T) {
+	th := DefaultTheme()
+	out := &RemoteOutcome{
+		Total:    2,
+		LastCase: "[2,7,11,15]\n9\n[3,2,4]\n6",
+		Expected: []string{"2", "0"},
+		Actual:   []string{"2", "0"},
+	}
+	got := renderRunCases(th, out, 2, 60)
+	for _, want := range []string{"case 1", "[2,7,11,15], 9", "case 2", "[3,2,4], 6"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Count(got, "exp") != 2 || strings.Count(got, "got") != 2 {
+		t.Errorf("expected exp/got for both (passing) cases, got:\n%s", got)
+	}
+}
+
+func TestRenderRemoteRunShowsCasesEvenWhenAccepted(t *testing.T) {
+	th := DefaultTheme()
+	out := &RemoteOutcome{
+		Kind: "run", Verdict: "Sample tests passed", Accepted: true, Total: 1,
+		LastCase: "[2,7,11,15]\n9",
+		Expected: []string{"[0,1]"}, Actual: []string{"[0,1]"},
+	}
+	got := renderRemote(th, "run", out, nil, false, "", 60, 2)
+	if !strings.Contains(got, "[0,1]") || !strings.Contains(got, "[2,7,11,15], 9") {
+		t.Errorf("an accepted Run Code result should still show its case detail, got:\n%s", got)
+	}
+}
+
+func TestRenderRemoteSubmitFallsBackToRawInputOnly(t *testing.T) {
+	th := DefaultTheme()
+	// Real submission-check responses typically carry no per-case answer data.
+	out := &RemoteOutcome{
+		Kind: "submit", Verdict: "Wrong Answer", Accepted: false,
+		Passed: 5, Total: 12, LastCase: "1002",
+	}
+	got := renderRemote(th, "submit", out, nil, false, "", 60, 2)
+	if !strings.Contains(got, "failed on input") || !strings.Contains(got, "1002") {
+		t.Errorf("submit should still show the one failing input, got:\n%s", got)
+	}
+	if strings.Contains(got, "case 1") {
+		t.Errorf("no per-case table without per-case answer data, got:\n%s", got)
 	}
 }
 

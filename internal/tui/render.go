@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/sven97/lazyleet/internal/runner"
+	"github.com/sven97/lazyleet/internal/testcase"
 )
 
 // chromaLexer maps a lazyleet language slug to a chroma lexer name.
@@ -117,7 +118,11 @@ func renderResults(th Theme, res *runner.Result, runErr error, running bool, spi
 			b.WriteString(th.DiffDel.Render("  got  ") + truncate(c.Actual, width-7) + "\n")
 		}
 		if c.Status == runner.StatusPass && c.Expected != "" {
-			b.WriteString(th.Muted.Render("  out  ") + truncate(c.Actual, width-7) + "\n")
+			// Show both, even though they're equal on a pass: seeing the
+			// actual expected/got values (not just the checkmark) is the
+			// point of a "let me verify this myself" pass over the results.
+			b.WriteString(th.Muted.Render("  exp  ") + truncate(c.Expected, width-7) + "\n")
+			b.WriteString(th.Muted.Render("  got  ") + truncate(c.Actual, width-7) + "\n")
 		}
 		if c.Status == runner.StatusUnknown && c.Actual != "" {
 			b.WriteString(th.Muted.Render("  got  ") + truncate(c.Actual, width-7) + "\n")
@@ -133,7 +138,9 @@ func renderResults(th Theme, res *runner.Result, runErr error, running bool, spi
 }
 
 // renderRemote formats a LeetCode run/submit outcome for the Results pane.
-func renderRemote(th Theme, kind string, out *RemoteOutcome, err error, running bool, spin string, width int) string {
+// arity is the solution function's parameter count, needed to split a Run
+// Code response's concatenated LastCase back into one input per case.
+func renderRemote(th Theme, kind string, out *RemoteOutcome, err error, running bool, spin string, width int, arity int) string {
 	verb := "running on LeetCode"
 	if kind == "submit" {
 		verb = "submitting to LeetCode"
@@ -182,15 +189,77 @@ func renderRemote(th Theme, kind string, out *RemoteOutcome, err error, running 
 		b.WriteString("\n" + th.Fail.Render("runtime error") + "\n" + s + "\n")
 	}
 
-	if !out.Accepted && strings.TrimSpace(out.LastCase) != "" {
+	switch {
+	case kind == "run" && len(out.Expected) > 0 && len(out.Actual) > 0:
+		// Run Code always evaluates a small, known set of cases (the visible
+		// examples, or whatever you gave it) — show all of them, input,
+		// expected, and actual, not just the one(s) that failed. That's what
+		// lets a "passed" result be checked rather than taken on faith.
+		b.WriteString(renderRunCases(th, out, arity, width))
+		if !out.Accepted && strings.TrimSpace(out.LastCase) != "" {
+			b.WriteString(th.Muted.Render("press i to import the failing case(s) as local tests") + "\n")
+		}
+	case !out.Accepted && strings.TrimSpace(out.LastCase) != "":
+		// Submit only ever gives us the one failing hidden case's input —
+		// LeetCode's own submission-check response doesn't carry per-case
+		// output/expected the way Run Code's does.
 		b.WriteString("\n" + th.DiffDel.Render("failed on input") + "\n")
 		for _, ln := range strings.Split(strings.TrimRight(out.LastCase, "\n"), "\n") {
 			b.WriteString("  " + truncate(ln, width-3) + "\n")
 		}
 		b.WriteString(th.Muted.Render("press i to import this case as a local test") + "\n")
-	}
-	if !out.Accepted {
 		b.WriteString(renderCaseDiffs(th, out, width))
+	}
+	return b.String()
+}
+
+// renderRunCases lists every case a Run Code request evaluated: input,
+// expected, and actual, each marked pass/fail. Unlike Submit (up to hundreds
+// of hidden cases, only one of which — the first failure — is ever visible),
+// Run Code only ever covers a handful of cases you can see in full.
+func renderRunCases(th Theme, out *RemoteOutcome, arity int, width int) string {
+	n := len(out.Expected)
+	if len(out.Actual) < n {
+		n = len(out.Actual)
+	}
+	if out.Total > 0 && out.Total < n {
+		n = out.Total
+	}
+	if cr := out.CompareResult; cr != "" && len(cr) < n {
+		n = len(cr)
+	}
+	if n == 0 {
+		return ""
+	}
+
+	var ins [][]string
+	if arity > 0 {
+		if cases, err := testcase.FromLeetCodeExample(out.LastCase, arity); err == nil && len(cases) >= n {
+			for _, c := range cases[:n] {
+				ins = append(ins, c.In)
+			}
+		}
+	}
+
+	wrong := func(i int) bool {
+		if cr := out.CompareResult; i < len(cr) {
+			return cr[i] != '1'
+		}
+		return out.Expected[i] != out.Actual[i]
+	}
+
+	var b strings.Builder
+	for i := 0; i < n; i++ {
+		mark, label := th.Pass.Render("✓"), th.Muted.Render(fmt.Sprintf("case %d", i+1))
+		if wrong(i) {
+			mark, label = th.Fail.Render("✗"), th.Fail.Render(fmt.Sprintf("case %d", i+1))
+		}
+		b.WriteString("\n" + mark + " " + label + "\n")
+		if i < len(ins) {
+			b.WriteString(th.Muted.Render("  in   ") + truncate(strings.Join(ins[i], ", "), width-7) + "\n")
+		}
+		b.WriteString(th.DiffAdd.Render("  exp  ") + truncate(out.Expected[i], width-7) + "\n")
+		b.WriteString(th.DiffDel.Render("  got  ") + truncate(out.Actual[i], width-7) + "\n")
 	}
 	return b.String()
 }

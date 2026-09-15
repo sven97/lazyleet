@@ -620,7 +620,7 @@ func (m *WorkspaceModel) refreshResults() {
 	}
 	var body string
 	if m.showRemote {
-		body = renderRemote(m.th, m.remoteKind, m.remoteOut, m.remoteErr, m.remoteRunning, m.spin.View(), m.results.Width)
+		body = renderRemote(m.th, m.remoteKind, m.remoteOut, m.remoteErr, m.remoteRunning, m.spin.View(), m.results.Width, m.q.Meta.Arity())
 	} else {
 		body = renderResults(m.th, m.lastRun, m.lastErr, m.running, m.spin.View(), m.results.Width)
 	}
