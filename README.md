@@ -103,7 +103,7 @@ otherwise do through a lot of clicking.
 │    Input:  nums = [3,2,4], target =      ││  in   [3,2,4], 6                                     │
 │  6                                       ││  out  [1, 2]                                         │
 ╰──────────────────────────────────────────╯╰──────────────────────────────────────────────────────╯
-e edit │ r run local │ R run @LC │ s submit │ tab next pane │ z zoom │ b back │ q quit
+e edit │ r run local │ R run @LC │ s submit │ i import │ tab next pane │ z zoom │ ? help │ b back │…
 ```
 
 *(Real terminal captures, colors flattened to text for the README — run it
