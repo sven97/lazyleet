@@ -277,7 +277,7 @@ func (m *WorkspaceModel) startRun() (tea.Model, tea.Cmd) {
 
 func (m *WorkspaceModel) startRemote(kind string) (tea.Model, tea.Cmd) {
 	if m.remote == nil || !m.remote.Available() {
-		m.statusMsg = "run/submit on LeetCode needs `lazyleet auth`"
+		m.statusMsg = "run `lazyleet auth` in another terminal, then retry R/s"
 		return m, nil
 	}
 	if m.remoteRunning {

@@ -12,35 +12,52 @@ import (
 // remoteJudge implements tui.RemoteJudge over a LeetCode client. It is created
 // per workspace session.
 type remoteJudge struct {
-	app    *appContext
-	client *leetcode.Client
-	slug   string
-	qid    int
-	lang   string
-	authed bool
+	app  *appContext
+	slug string
+	qid  int
+	lang string
 }
 
 func newRemoteJudge(app *appContext, q leetcode.Question, lang string) tui.RemoteJudge {
-	creds, _ := app.loadCredentials()
-	client, _ := app.newClient()
 	return &remoteJudge{
-		app:    app,
-		client: client,
-		slug:   q.Slug,
-		qid:    q.QuestionID,
-		lang:   lang,
-		authed: client != nil && !creds.Anonymous(),
+		app:  app,
+		slug: q.Slug,
+		qid:  q.QuestionID,
+		lang: lang,
 	}
 }
 
-func (r *remoteJudge) Available() bool { return r.authed && r.client != nil && r.qid != 0 }
+func (r *remoteJudge) Available() bool {
+	creds, err := r.app.loadCredentials()
+	return err == nil && !creds.Anonymous() && r.qid != 0
+}
+
+// Reload credentials for each attempt: signing in from another terminal must
+// take effect without discarding the open workspace.
+func (r *remoteJudge) authenticatedClient(ctx context.Context) (*leetcode.Client, error) {
+	client, err := r.app.newClient()
+	if err != nil {
+		return nil, err
+	}
+	if !client.Authenticated() {
+		return nil, fmt.Errorf("run `lazyleet auth` in another terminal, then retry R/s")
+	}
+	if err := requireSession(ctx, client); err != nil {
+		return nil, err
+	}
+	return client, nil
+}
 
 func (r *remoteJudge) Run(ctx context.Context, code, dataInput string) (tui.RemoteOutcome, error) {
-	ir, err := r.client.Interpret(ctx, r.slug, r.qid, r.lang, code, dataInput)
+	client, err := r.authenticatedClient(ctx)
 	if err != nil {
 		return tui.RemoteOutcome{}, err
 	}
-	res, err := r.client.PollResult(ctx, r.slug, ir.InterpretID, nil)
+	ir, err := client.Interpret(ctx, r.slug, r.qid, r.lang, code, dataInput)
+	if err != nil {
+		return tui.RemoteOutcome{}, err
+	}
+	res, err := client.PollResult(ctx, r.slug, ir.InterpretID, nil)
 	if err != nil {
 		return tui.RemoteOutcome{}, err
 	}
@@ -48,11 +65,15 @@ func (r *remoteJudge) Run(ctx context.Context, code, dataInput string) (tui.Remo
 }
 
 func (r *remoteJudge) Submit(ctx context.Context, code string) (tui.RemoteOutcome, error) {
-	sr, err := r.client.Submit(ctx, r.slug, r.qid, r.lang, code)
+	client, err := r.authenticatedClient(ctx)
 	if err != nil {
 		return tui.RemoteOutcome{}, err
 	}
-	res, err := r.client.PollResult(ctx, r.slug, fmt.Sprint(sr.SubmissionID), nil)
+	sr, err := client.Submit(ctx, r.slug, r.qid, r.lang, code)
+	if err != nil {
+		return tui.RemoteOutcome{}, err
+	}
+	res, err := client.PollResult(ctx, r.slug, fmt.Sprint(sr.SubmissionID), nil)
 	if err != nil {
 		return tui.RemoteOutcome{}, err
 	}

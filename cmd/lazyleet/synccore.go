@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/sven97/lazyleet/internal/leetcode"
@@ -12,6 +13,11 @@ import (
 // fetchAndCacheProblems pulls the full problem list from LeetCode and upserts it
 // into the store. progress, if non-nil, is called after each page.
 func fetchAndCacheProblems(ctx context.Context, client *leetcode.Client, db *store.Store, progress func(fetched, total int)) (int, error) {
+	if client.Authenticated() {
+		if err := requireSession(ctx, client); err != nil {
+			return 0, err
+		}
+	}
 	summaries, err := client.ListAllProblems(ctx, leetcode.ProblemFilter{}, progress)
 	if err != nil {
 		return 0, err
@@ -40,6 +46,9 @@ func fetchAndCacheProblems(ctx context.Context, client *leetcode.Client, db *sto
 // vs. the whole catalog) and rewriting the status column. Returns the number of
 // solved problems. Requires an authenticated client.
 func fetchAndCacheProgress(ctx context.Context, client *leetcode.Client, db *store.Store) (int, error) {
+	if err := requireSession(ctx, client); err != nil {
+		return 0, err
+	}
 	ac, err := client.ListAllProblems(ctx, leetcode.ProblemFilter{Status: "AC"}, nil)
 	if err != nil {
 		return 0, err
@@ -78,4 +87,17 @@ func cacheBundledPlans(ctx context.Context, db *store.Store) (int, error) {
 		}
 	}
 	return len(all), nil
+}
+
+// Check before replacing cached statuses: an expired cookie can otherwise
+// return an anonymous, empty progress list and erase the user's cached progress.
+func requireSession(ctx context.Context, client *leetcode.Client) error {
+	user, err := client.WhoAmI(ctx)
+	if err != nil {
+		return fmt.Errorf("could not verify session: %w", err)
+	}
+	if user == "" {
+		return fmt.Errorf("session expired — run `lazyleet auth`, then retry")
+	}
+	return nil
 }

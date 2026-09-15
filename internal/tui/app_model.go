@@ -172,7 +172,7 @@ func (m *AppModel) closeWorkspace() (tea.Model, tea.Cmd) {
 	if m.width > 0 {
 		_, cmd = m.browse.Update(tea.WindowSizeMsg{Width: m.width, Height: m.height})
 	}
-	return m, cmd
+	return m, tea.Batch(cmd, m.browse.loadProblems(), m.browse.loadAuth(), m.browse.loadDaily())
 }
 
 // InWorkspace reports whether the workspace child is active (tests / debug).
