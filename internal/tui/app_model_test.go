@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -63,8 +64,21 @@ func TestAppModelOpenAndBackPreservesBrowseFilter(t *testing.T) {
 	}
 	updated, cmd = am.Update(op)
 	am = updated.(*AppModel)
+	if am.InWorkspace() {
+		t.Fatal("workspace should not open until the async factory command completes")
+	}
+	if cmd == nil {
+		t.Fatal("expected async workspace-open command")
+	}
+	msg = cmd()
+	opened, ok := msg.(workspaceOpenedMsg)
+	if !ok {
+		t.Fatalf("got %T, want workspaceOpenedMsg", msg)
+	}
+	updated, cmd = am.Update(opened)
+	am = updated.(*AppModel)
 	if !am.InWorkspace() {
-		t.Fatal("expected workspace mode after OpenProblemMsg")
+		t.Fatal("expected workspace mode after workspaceOpenedMsg")
 	}
 	if cmd != nil {
 		// workspace Init — ignore
@@ -111,6 +125,62 @@ func TestAppModelQuitFromBrowseExits(t *testing.T) {
 	// tea.Quit is opaque; just ensure we did not open workspace
 	if am.InWorkspace() {
 		t.Fatal("q from browse should not open workspace")
+	}
+}
+
+// TestAppModelOpenClearsStalePriorError guards against a stale error banner:
+// a failed open must not misattribute its message to a later, unrelated,
+// successful open.
+func TestAppModelOpenClearsStalePriorError(t *testing.T) {
+	bm, _ := bootBrowse(t)
+	attempt := 0
+	factory := func(slug string) (*WorkspaceModel, error) {
+		attempt++
+		if attempt == 1 {
+			return nil, fmt.Errorf("no starter code available")
+		}
+		q, ok := leetcode.Fixture("two-sum")
+		if !ok {
+			t.Fatal("fixture missing")
+		}
+		ws, err := workspace.Scaffold(t.TempDir(), q, "python3")
+		if err != nil {
+			return nil, err
+		}
+		return NewWorkspaceModel(ws, q, "true", false, 400, nil)
+	}
+	am := NewAppModel(bm, factory)
+	updated, _ := am.Update(tea.WindowSizeMsg{Width: 140, Height: 40})
+	am = updated.(*AppModel)
+
+	// First open fails.
+	updated, cmd := am.Update(OpenProblemMsg{Slug: "some-slug"})
+	am = updated.(*AppModel)
+	if cmd == nil {
+		t.Fatal("expected async workspace-open command")
+	}
+	updated, _ = am.Update(cmd())
+	am = updated.(*AppModel)
+	if am.InWorkspace() {
+		t.Fatal("failed open should not enter workspace mode")
+	}
+	if am.Browse().statusMsg == "" {
+		t.Fatal("expected error statusMsg after failed open")
+	}
+
+	// Second open succeeds; the stale error must be gone.
+	updated, cmd = am.Update(OpenProblemMsg{Slug: "two-sum"})
+	am = updated.(*AppModel)
+	if cmd == nil {
+		t.Fatal("expected async workspace-open command")
+	}
+	updated, _ = am.Update(cmd())
+	am = updated.(*AppModel)
+	if !am.InWorkspace() {
+		t.Fatal("expected workspace mode after successful open")
+	}
+	if am.Browse().statusMsg != "" {
+		t.Fatalf("stale error statusMsg survived a successful open: %q", am.Browse().statusMsg)
 	}
 }
 

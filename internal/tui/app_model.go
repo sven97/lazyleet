@@ -59,8 +59,22 @@ func (m *AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width, m.height = msg.Width, msg.Height
 	case OpenProblemMsg:
 		return m.openWorkspace(msg.Slug)
+	case workspaceOpenedMsg:
+		return m.handleWorkspaceOpened(msg)
 	case BackToBrowseMsg:
 		return m.closeWorkspace()
+	}
+
+	// Background commands browse started (sync, plan/statement loads, ...)
+	// keep completing after the user opens a workspace; route their results
+	// to browse regardless of which child is currently active, or browse's
+	// state (spinners, statusMsg) gets stuck once a workspace is open.
+	if isBrowseBackgroundMsg(msg) {
+		updated, cmd := m.browse.Update(msg)
+		if bm, ok := updated.(*BrowseModel); ok {
+			m.browse = bm
+		}
+		return m, cmd
 	}
 
 	if m.workspace != nil {
@@ -82,6 +96,22 @@ func (m *AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+// isBrowseBackgroundMsg reports whether msg is the completion of an async
+// command browse started on its own (sync, plan/statement/position/auth
+// loads, ...). These must always reach browse.Update, even while a workspace
+// is open, or browse's in-flight state (e.g. the "syncing" spinner) never
+// clears once the user opens a problem before the command finishes.
+func isBrowseBackgroundMsg(msg tea.Msg) bool {
+	switch msg.(type) {
+	case browseLoadedMsg, plansLoadedMsg, planSlugsMsg, statementMsg,
+		syncDoneMsg, progressDoneMsg, positionLoadedMsg, authLoadedMsg,
+		userLoadedMsg, dailyLoadedMsg, previewRenderedMsg, previewImagesMsg:
+		return true
+	default:
+		return false
+	}
+}
+
 func (m *AppModel) View() string {
 	if m.workspace != nil {
 		return m.workspace.View()
@@ -89,17 +119,36 @@ func (m *AppModel) View() string {
 	return m.browse.View()
 }
 
+// workspaceOpenedMsg is the async result of running the factory for
+// OpenProblemMsg; the factory hits the LeetCode API and SQLite, so it must
+// not run inline in Update (that would freeze the whole TUI until it
+// returns).
+type workspaceOpenedMsg struct {
+	ws  *WorkspaceModel
+	err error
+}
+
 func (m *AppModel) openWorkspace(slug string) (tea.Model, tea.Cmd) {
 	if m.factory == nil {
 		m.browse.statusMsg = "cannot open workspace: no factory configured"
 		return m, nil
 	}
-	ws, err := m.factory(slug)
-	if err != nil {
-		m.browse.statusMsg = fmt.Sprintf("workspace: %v", err)
-		m.statusErr = err.Error()
+	m.statusErr = ""
+	m.browse.statusMsg = "opening problem…"
+	factory := m.factory
+	return m, func() tea.Msg {
+		ws, err := factory(slug)
+		return workspaceOpenedMsg{ws: ws, err: err}
+	}
+}
+
+func (m *AppModel) handleWorkspaceOpened(msg workspaceOpenedMsg) (tea.Model, tea.Cmd) {
+	if msg.err != nil {
+		m.browse.statusMsg = fmt.Sprintf("workspace: %v", msg.err)
+		m.statusErr = msg.err.Error()
 		return m, nil
 	}
+	ws := msg.ws
 	ws.returnToBrowse = true
 	if m.imgWriter != nil {
 		ws.EnableImages(m.imgProto, m.imgDir, m.imgWriter)
@@ -109,6 +158,8 @@ func (m *AppModel) openWorkspace(slug string) (tea.Model, tea.Cmd) {
 	}
 	m.workspace = ws
 	m.browse.Chosen = ""
+	m.browse.statusMsg = ""
+	m.statusErr = ""
 	return m, ws.Init()
 }
 
