@@ -1,10 +1,9 @@
 // Package runner is lazyleet's local judge: it wraps the user's solution,
 // feeds it each test case in a sandboxed subprocess, and compares the output.
 //
-// Phase 5 in PLAN.md. This first cut ships the Python driver and a simple
-// exact-match comparison (JSON-normalised). Order-insensitive comparison,
-// float tolerance, multiple-valid-answers, and "design" problems come later and
-// will be driven by per-problem configuration.
+// Drivers: python3/python, javascript, golang, java, cpp. Comparison supports
+// order-insensitive arrays and float tolerance (see EqualOutputs). Design
+// problems (empty Meta.Name) return a clear unsupported BuildErr.
 package runner
 
 import (
@@ -79,6 +78,14 @@ func For(lang string) (Runner, bool) {
 	switch lang {
 	case "python3", "python":
 		return pythonRunner{bin: pythonBin(lang)}, true
+	case "javascript":
+		return javascriptRunner{}, true
+	case "golang", "go":
+		return golangRunner{}, true
+	case "java":
+		return javaRunner{}, true
+	case "cpp", "c++":
+		return cppRunner{}, true
 	default:
 		return nil, false
 	}
