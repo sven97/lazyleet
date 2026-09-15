@@ -200,15 +200,21 @@ func renderRemote(th Theme, kind string, out *RemoteOutcome, err error, running 
 			b.WriteString(th.Muted.Render("press i to import the failing case(s) as local tests") + "\n")
 		}
 	case !out.Accepted && strings.TrimSpace(out.LastCase) != "":
-		// Submit only ever gives us the one failing hidden case's input —
-		// LeetCode's own submission-check response doesn't carry per-case
-		// output/expected the way Run Code's does.
+		// Submit only ever surfaces one case: the first hidden test that
+		// failed. Its input is LastCase; mapOutcome already fills Expected/
+		// Actual from that same case's actual/expected value when LeetCode's
+		// response carries them (a submission check leaves the per-case
+		// arrays Run Code uses empty, but has separate single-value fields
+		// for this one case — see JudgeResult's field comments).
 		b.WriteString("\n" + th.DiffDel.Render("failed on input") + "\n")
 		for _, ln := range strings.Split(strings.TrimRight(out.LastCase, "\n"), "\n") {
 			b.WriteString("  " + truncate(ln, width-3) + "\n")
 		}
 		b.WriteString(th.Muted.Render("press i to import this case as a local test") + "\n")
-		b.WriteString(renderCaseDiffs(th, out, width))
+		if len(out.Expected) > 0 && len(out.Actual) > 0 {
+			b.WriteString(th.DiffAdd.Render("  exp  ") + truncate(out.Expected[0], width-7) + "\n")
+			b.WriteString(th.DiffDel.Render("  got  ") + truncate(out.Actual[0], width-7) + "\n")
+		}
 	}
 	return b.String()
 }
@@ -258,56 +264,6 @@ func renderRunCases(th Theme, out *RemoteOutcome, sentCases []testcase.Case, wid
 		}
 		b.WriteString(expStyle.Render("  exp  ") + truncate(out.Expected[i], width-7) + "\n")
 		b.WriteString(gotStyle.Render("  got  ") + truncate(out.Actual[i], width-7) + "\n")
-	}
-	return b.String()
-}
-
-// renderCaseDiffs formats the expected/actual mismatch for a failed remote
-// run or submission. LeetCode's Expected/Actual are index-aligned slices, one
-// entry per test case evaluated, not pre-filtered to the failing ones — and
-// have been observed to carry a trailing padding entry beyond TotalTestcases.
-// Clamp to Total (when known) and only show cases that actually mismatch, so
-// a partial-fail run (e.g. 1 of 2 samples wrong) doesn't bury the one wrong
-// case inside a flat "exp 2 | 0" / "got 1 | 0" line the reader has to align
-// by hand, padded by a case that already passed.
-//
-// Which cases mismatch is decided from CompareResult (LeetCode's own
-// per-case '1'/'0' bitmask) when present — authoritative, and immune to a
-// case reading as "wrong" only because of incidental formatting differences
-// between Expected[i] and Actual[i]. Falls back to comparing the two slices
-// directly when CompareResult is absent (e.g. it may not accompany every
-// response shape).
-func renderCaseDiffs(th Theme, out *RemoteOutcome, width int) string {
-	n := len(out.Expected)
-	if len(out.Actual) < n {
-		n = len(out.Actual)
-	}
-	if out.Total > 0 && out.Total < n {
-		n = out.Total
-	}
-	if cr := out.CompareResult; cr != "" && len(cr) < n {
-		n = len(cr)
-	}
-
-	wrong := func(i int) bool {
-		if cr := out.CompareResult; i < len(cr) {
-			return cr[i] != '1'
-		}
-		return out.Expected[i] != out.Actual[i]
-	}
-
-	var b strings.Builder
-	for i := 0; i < n; i++ {
-		if !wrong(i) {
-			continue
-		}
-		if n > 1 {
-			b.WriteString("\n" + th.Muted.Render(fmt.Sprintf("case %d", i+1)) + "\n")
-		} else {
-			b.WriteString("\n")
-		}
-		b.WriteString(th.DiffAdd.Render("  exp  ") + truncate(out.Expected[i], width-7) + "\n")
-		b.WriteString(th.DiffDel.Render("  got  ") + truncate(out.Actual[i], width-7) + "\n")
 	}
 	return b.String()
 }

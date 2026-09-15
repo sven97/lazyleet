@@ -74,18 +74,22 @@ func (r *remoteJudge) markSolved() {
 
 func mapOutcome(kind string, res leetcode.JudgeResult) tui.RemoteOutcome {
 	out := tui.RemoteOutcome{
-		Kind:          kind,
-		Verdict:       res.StatusMsg,
-		Passed:        res.TotalCorrect,
-		Total:         res.TotalTestcases,
-		Runtime:       res.StatusRuntime,
-		Memory:        res.StatusMemory,
-		RuntimePct:    res.RuntimePercentile,
-		MemoryPct:     res.MemoryPercentile,
-		LastCase:      res.LastTestcase,
-		Stdout:        res.CodeOutput,
-		Expected:      res.ExpectedAnswer,
-		Actual:        res.CodeAnswer,
+		Kind:       kind,
+		Verdict:    res.StatusMsg,
+		Passed:     res.TotalCorrect,
+		Total:      res.TotalTestcases,
+		Runtime:    res.StatusRuntime,
+		Memory:     res.StatusMemory,
+		RuntimePct: res.RuntimePercentile,
+		MemoryPct:  res.MemoryPercentile,
+		LastCase:   res.LastTestcase,
+		Stdout:     res.CodeOutput,
+		// CodeAnswer/ExpectedAnswer (plural, per-case) are what's populated
+		// for a Run Code check; a submission check leaves those empty and
+		// carries the one failing case's actual/expected in CodeOutput/
+		// ExpectedOutput instead — see the field comments on JudgeResult.
+		Expected:      firstNonEmptySlice(res.ExpectedAnswer, res.ExpectedOutput),
+		Actual:        firstNonEmptySlice(res.CodeAnswer, res.CodeOutput),
 		CompareResult: res.CompareResult,
 		CompileErr:    strings.TrimSpace(res.FullCompileError),
 		RuntimeErr:    strings.TrimSpace(res.FullRuntimeError),
@@ -109,4 +113,12 @@ func mapOutcome(kind string, res leetcode.JudgeResult) tui.RemoteOutcome {
 		}
 	}
 	return out
+}
+
+// firstNonEmptySlice returns a, or b if a is empty.
+func firstNonEmptySlice(a, b []string) []string {
+	if len(a) > 0 {
+		return a
+	}
+	return b
 }

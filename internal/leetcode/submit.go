@@ -83,9 +83,17 @@ type JudgeResult struct {
 	ExpectedAnswer    []string `json:"expected_code_answer"`
 	CompareResult     string   `json:"compare_result"`
 	LastTestcase      string   `json:"last_testcase"`
-	CodeOutput        []string `json:"code_output"`
-	FullCompileError  string   `json:"full_compile_error"`
-	FullRuntimeError  string   `json:"full_runtime_error"`
+	// CodeOutput/ExpectedOutput double as the actual/expected value for a
+	// submission's one failing hidden case (LastTestcase's input) — a
+	// submission check leaves CodeAnswer/ExpectedAnswer empty and surfaces
+	// these instead. See mapOutcome in cmd/lazyleet for where that's used;
+	// this behavior comes from reverse-engineered community LeetCode CLIs
+	// (e.g. clearloop/leetcode-cli's VerifyResult), not first-party docs —
+	// there aren't any for this API.
+	CodeOutput       []string `json:"code_output"`
+	ExpectedOutput   []string `json:"expected_output"`
+	FullCompileError string   `json:"full_compile_error"`
+	FullRuntimeError string   `json:"full_runtime_error"`
 }
 
 // UnmarshalJSON tolerates LeetCode's shifting types: code_answer /
@@ -109,6 +117,7 @@ func (r *JudgeResult) UnmarshalJSON(b []byte) error {
 		CompareResult     string      `json:"compare_result"`
 		LastTestcase      string      `json:"last_testcase"`
 		CodeOutput        flexStrings `json:"code_output"`
+		ExpectedOutput    flexStrings `json:"expected_output"`
 		FullCompileError  string      `json:"full_compile_error"`
 		FullRuntimeError  string      `json:"full_runtime_error"`
 	}
@@ -124,7 +133,7 @@ func (r *JudgeResult) UnmarshalJSON(b []byte) error {
 		RuntimePercentile: a.RuntimePercentile, MemoryPercentile: a.MemoryPercentile,
 		CodeAnswer: a.CodeAnswer, ExpectedAnswer: a.ExpectedAnswer,
 		CompareResult: a.CompareResult, LastTestcase: a.LastTestcase,
-		CodeOutput:       a.CodeOutput,
+		CodeOutput: a.CodeOutput, ExpectedOutput: a.ExpectedOutput,
 		FullCompileError: a.FullCompileError, FullRuntimeError: a.FullRuntimeError,
 	}
 	return nil

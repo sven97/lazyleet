@@ -32,7 +32,7 @@ func TestTruncateRespectsDisplayWidth(t *testing.T) {
 	}
 }
 
-func TestRenderCaseDiffsShowsOnlyTheWrongCase(t *testing.T) {
+func TestRenderRunCasesClampsATrailingPaddingEntry(t *testing.T) {
 	th := DefaultTheme()
 	// 1 of 2 samples wrong, plus the trailing padding entry LeetCode's
 	// interpret responses have been seen to carry beyond TotalTestcases.
@@ -41,39 +41,36 @@ func TestRenderCaseDiffsShowsOnlyTheWrongCase(t *testing.T) {
 		Expected: []string{"2", "0", ""},
 		Actual:   []string{"1", "0", ""},
 	}
-	got := renderCaseDiffs(th, out, 40)
+	got := renderRunCases(th, out, nil, 40)
 
 	if strings.Contains(got, "|") {
-		t.Errorf("padding entry leaked into the diff:\n%s", got)
+		t.Errorf("padding entry leaked into the render:\n%s", got)
 	}
-	if !strings.Contains(got, "case 1") {
-		t.Errorf("should label which case failed:\n%s", got)
+	if !strings.Contains(got, "case 1") || !strings.Contains(got, "case 2") {
+		t.Errorf("should show both real cases:\n%s", got)
 	}
-	if strings.Contains(got, "case 2") {
-		t.Errorf("case 2 passed and shouldn't be shown:\n%s", got)
-	}
-	if !strings.Contains(got, "2") || !strings.Contains(got, "1") {
-		t.Errorf("should show case 1's expected/actual values:\n%s", got)
+	if strings.Contains(got, "case 3") {
+		t.Errorf("the padding entry shouldn't render as a third case:\n%s", got)
 	}
 }
 
-func TestRenderCaseDiffsSingleCaseOmitsLabel(t *testing.T) {
+func TestRenderRemoteSubmitShowsExpGotWhenMapOutcomeFoundThem(t *testing.T) {
 	th := DefaultTheme()
-	out := &RemoteOutcome{Total: 1, Expected: []string{"[0,1]"}, Actual: []string{"[1,0]"}}
-	got := renderCaseDiffs(th, out, 40)
+	// Simulates mapOutcome's fallback to CodeOutput/ExpectedOutput for the
+	// one failing case a submission check surfaces (see remotejudge.go).
+	out := &RemoteOutcome{
+		Kind: "submit", Verdict: "Wrong Answer", Accepted: false,
+		Passed: 5, Total: 12, LastCase: "1002",
+		Expected: []string{"4"}, Actual: []string{"9"},
+	}
+	got := renderRemote(th, "submit", out, nil, false, "", 60, nil)
+	for _, want := range []string{"1002", "4", "9"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q:\n%s", want, got)
+		}
+	}
 	if strings.Contains(got, "case 1") {
-		t.Errorf("a single-case diff doesn't need a case label:\n%s", got)
-	}
-	if !strings.Contains(got, "[0,1]") || !strings.Contains(got, "[1,0]") {
-		t.Errorf("missing expected/actual values:\n%s", got)
-	}
-}
-
-func TestRenderCaseDiffsAllPassingShowsNothing(t *testing.T) {
-	th := DefaultTheme()
-	out := &RemoteOutcome{Total: 2, Expected: []string{"2", "0"}, Actual: []string{"2", "0"}}
-	if got := renderCaseDiffs(th, out, 40); got != "" {
-		t.Errorf("no mismatched case should render nothing, got:\n%s", got)
+		t.Errorf("a single known-failing case doesn't need a case label:\n%s", got)
 	}
 }
 
