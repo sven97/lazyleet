@@ -311,12 +311,22 @@ func (m *WorkspaceModel) importFailingCase() (tea.Model, tea.Cmd) {
 		m.statusMsg = "could not parse the failing case"
 		return m, nil
 	}
-	if err := m.ws.AppendCases(cases); err != nil {
+	added, err := m.ws.AppendCases(cases)
+	if err != nil {
 		m.statusMsg = "import failed: " + err.Error()
 		return m, nil
 	}
-	m.statusMsg = fmt.Sprintf("imported %d case(s) → testcases.jsonl", len(cases))
-	return m.startRun()
+	msg := fmt.Sprintf("imported %d case(s) → testcases.jsonl", added)
+	if added == 0 {
+		msg = "already have this case in testcases.jsonl"
+	}
+	// startRun() clears statusMsg as part of kicking off a normal run, so set
+	// ours after — it survives (runFinishedMsg doesn't touch statusMsg) and
+	// shows once the run's own "running…" spinner clears, instead of the
+	// confirmation being wiped before it's ever seen.
+	model, cmd := m.startRun()
+	m.statusMsg = msg
+	return model, cmd
 }
 
 // Update implements tea.Model.

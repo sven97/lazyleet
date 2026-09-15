@@ -121,11 +121,13 @@ func (w *Workspace) ReadCases() ([]testcase.Case, error) {
 }
 
 // AppendCases adds cases to the test-case file, skipping any whose inputs
-// exactly match an existing case.
-func (w *Workspace) AppendCases(add []testcase.Case) error {
+// exactly match an existing case. It returns how many were actually added,
+// so a caller reporting the result to the user isn't left claiming a case was
+// imported when it was really a duplicate no-op.
+func (w *Workspace) AppendCases(add []testcase.Case) (added int, err error) {
 	existing, err := w.ReadCases()
 	if err != nil && !os.IsNotExist(err) {
-		return err
+		return 0, err
 	}
 	seen := map[string]bool{}
 	for _, c := range existing {
@@ -136,17 +138,21 @@ func (w *Workspace) AppendCases(add []testcase.Case) error {
 		if k := strings.Join(c.In, "\x00"); !seen[k] {
 			seen[k] = true
 			merged = append(merged, c)
+			added++
 		}
 	}
-	if len(merged) == len(existing) {
-		return nil
+	if added == 0 {
+		return 0, nil
 	}
 	f, err := os.Create(w.TestsPath)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer f.Close()
-	return testcase.Write(f, merged)
+	if err := testcase.Write(f, merged); err != nil {
+		return 0, err
+	}
+	return added, nil
 }
 
 // backfillExpectedOutputs fills empty "out" fields in an existing testcases file

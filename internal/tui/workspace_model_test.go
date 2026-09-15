@@ -222,3 +222,49 @@ func TestWorkspaceImportFailingCaseAppendsAndRuns(t *testing.T) {
 		t.Fatalf("imported case wrong: %+v", last)
 	}
 }
+
+// TestWorkspaceImportConfirmationSurvivesTheAutoRun guards against a
+// regression where importFailingCase's "imported N case(s)" statusMsg was set
+// and then immediately wiped by the very startRun() call it triggers
+// (startRun clears statusMsg as part of a normal run) — the user pressed `i`
+// and got no visible confirmation that anything happened.
+func TestWorkspaceImportConfirmationSurvivesTheAutoRun(t *testing.T) {
+	fr := &fakeRemote{
+		available: true,
+		run:       RemoteOutcome{Kind: "run", LastCase: "[1,5,9]\n14"},
+	}
+	m := newTestModelWithRemote(t, fr)
+	m.Update(tea.WindowSizeMsg{Width: 140, Height: 40})
+
+	runCmd(&m, pressRune(&m, 'R'))
+	runCmd(&m, pressRune(&m, 'i'))
+
+	if !strings.Contains(m.statusMsg, "imported 1 case") {
+		t.Fatalf("statusMsg = %q, want it to report the import once the auto-run settles", m.statusMsg)
+	}
+}
+
+// TestWorkspaceImportDuplicateCaseIsReportedHonestly guards against
+// AppendCases's dedup (by exact input match) being silently indistinguishable
+// from a real import in the status message.
+func TestWorkspaceImportDuplicateCaseIsReportedHonestly(t *testing.T) {
+	fr := &fakeRemote{
+		available: true,
+		// Matches one of Two Sum's seeded example cases exactly.
+		run: RemoteOutcome{Kind: "run", LastCase: "[2,7,11,15]\n9"},
+	}
+	m := newTestModelWithRemote(t, fr)
+	m.Update(tea.WindowSizeMsg{Width: 140, Height: 40})
+
+	before, _ := m.ws.ReadCases()
+	runCmd(&m, pressRune(&m, 'R'))
+	runCmd(&m, pressRune(&m, 'i'))
+	after, _ := m.ws.ReadCases()
+
+	if len(after) != len(before) {
+		t.Fatalf("case count %d -> %d, want unchanged (duplicate input)", len(before), len(after))
+	}
+	if strings.Contains(m.statusMsg, "imported 1 case") {
+		t.Errorf("statusMsg = %q, shouldn't claim an import that was really a no-op", m.statusMsg)
+	}
+}
