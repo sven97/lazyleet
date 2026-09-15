@@ -30,7 +30,8 @@ type sourceItem struct {
 
 // BrowseModel is the Bubble Tea model for browse mode: a sources sidebar, a
 // fuzzy-filterable problem list, and a statement preview. Selecting a problem
-// with Enter sets Chosen and quits so the caller can open the workspace.
+// with Enter sets Chosen and either quits (standalone) or emits OpenProblemMsg
+// (when embedded in AppModel).
 type BrowseModel struct {
 	data BrowseData
 	th   Theme
@@ -109,8 +110,13 @@ type BrowseModel struct {
 	lastSync     time.Time // full problem catalog
 	progressSync time.Time // signed-in user's solve status
 
-	// Chosen is the slug the user opened, set just before tea.Quit.
+	// Chosen is the slug the user opened, set just before tea.Quit
+	// (standalone) or OpenProblemMsg (when embedded in AppModel).
 	Chosen string
+
+	// embedded means browse is owned by AppModel: Open emits OpenProblemMsg
+	// instead of quitting the program.
+	embedded bool
 }
 
 type browseLoadedMsg struct {
@@ -584,11 +590,7 @@ func (m *BrowseModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	case RegionList:
 		if idx := m.listRowAt(msg.Y); idx >= 0 {
 			if idx == m.cursor { // second click on the selected row → open
-				if s := m.currentSlug(); s != "" {
-					m.Chosen = s
-					m.savePosition()
-					return m, tea.Quit
-				}
+				return m.openCurrent()
 			}
 			m.cursor = idx
 			m.clampCursor()
@@ -850,6 +852,20 @@ func (m *BrowseModel) dailyRow() (BrowseRow, bool) {
 	return BrowseRow{Slug: m.daily.Slug, Title: m.daily.Title, Difficulty: m.daily.Difficulty}, true
 }
 
+func (m *BrowseModel) openCurrent() (tea.Model, tea.Cmd) {
+	s := m.currentSlug()
+	if s == "" {
+		return m, nil
+	}
+	m.Chosen = s
+	m.savePosition()
+	if m.embedded {
+		slug := s
+		return m, func() tea.Msg { return OpenProblemMsg{Slug: slug} }
+	}
+	return m, tea.Quit
+}
+
 func (m *BrowseModel) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	prev := m.cursor
 	switch {
@@ -866,12 +882,7 @@ func (m *BrowseModel) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.PageDown):
 		m.cursor += m.listRows()
 	case key.Matches(msg, m.keys.Open):
-		if s := m.currentSlug(); s != "" {
-			m.Chosen = s
-			m.savePosition()
-			return m, tea.Quit
-		}
-		return m, nil
+		return m.openCurrent()
 	default:
 		return m, nil
 	}

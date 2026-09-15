@@ -49,7 +49,7 @@ func newTestModelWithRemote(t *testing.T, remote RemoteJudge) *WorkspaceModel {
 	if err != nil {
 		t.Fatalf("NewWorkspaceModel: %v", err)
 	}
-	t.Cleanup(func() { m.watcher.Close() })
+	t.Cleanup(func() { m.Close() })
 	return m
 }
 

@@ -149,7 +149,7 @@ func TestWheelEdgeFilterWorkspaceShortContent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer m.watcher.Close()
+	defer m.Close()
 	up, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 200})
 	m = up.(*WorkspaceModel)
 
@@ -226,7 +226,7 @@ func TestWorkspaceClickFocusesPane(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer m.watcher.Close()
+	defer m.Close()
 	up, _ := m.Update(tea.WindowSizeMsg{Width: 140, Height: 40})
 	m = up.(*WorkspaceModel)
 

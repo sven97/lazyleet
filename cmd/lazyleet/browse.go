@@ -2,9 +2,7 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"os"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -12,9 +10,8 @@ import (
 	"github.com/sven97/lazyleet/internal/tui"
 )
 
-// runBrowse is the default action: loop the browse-mode TUI, launching the
-// workspace whenever the user picks a problem and returning to browse when they
-// leave it.
+// runBrowse is the default action: one Bubble Tea program that switches between
+// browse and workspace so filters and cursor are preserved on return.
 func runBrowse(app *appContext) error {
 	data, err := newBrowseData(app)
 	if err != nil {
@@ -22,30 +19,22 @@ func runBrowse(app *appContext) error {
 	}
 	defer data.Close()
 
-	for {
-		iw := tui.NewImageWriter(os.Stdout)
-		bm := tui.NewBrowseModel(data)
-		bm.EnableImages(termimg.Detect(app.cfg.Images), app.paths.ImageCacheDir, iw)
-		final, err := tea.NewProgram(
-			bm,
-			tea.WithAltScreen(),
-			tea.WithMouseCellMotion(),
-			tea.WithFPS(uiFPS),
-			tea.WithFilter(tui.WheelEdgeFilter),
-			tea.WithOutput(iw),
-		).Run()
-		if err != nil {
-			return err
-		}
-
-		bm, ok := final.(*tui.BrowseModel)
-		if !ok || bm.Chosen == "" {
-			return nil // user quit
-		}
-
-		if err := app.openWorkspace(context.Background(), bm.Chosen, "", false); err != nil {
-			fmt.Fprintln(os.Stderr, "workspace:", err)
-			time.Sleep(1500 * time.Millisecond)
-		}
+	bm := tui.NewBrowseModel(data)
+	factory := func(slug string) (*tui.WorkspaceModel, error) {
+		return app.buildWorkspaceModel(context.Background(), slug, "", false)
 	}
+	am := tui.NewAppModel(bm, factory)
+
+	iw := tui.NewImageWriter(os.Stdout)
+	am.EnableImages(termimg.Detect(app.cfg.Images), app.paths.ImageCacheDir, iw)
+
+	_, err = tea.NewProgram(
+		am,
+		tea.WithAltScreen(),
+		tea.WithMouseCellMotion(),
+		tea.WithFPS(uiFPS),
+		tea.WithFilter(tui.WheelEdgeFilter),
+		tea.WithOutput(iw),
+	).Run()
+	return err
 }
