@@ -81,6 +81,10 @@ type WorkspaceModel struct {
 	watcher   *workspace.Watcher
 	statusMsg string
 	showHelp  bool
+
+	// returnToBrowse makes Back/Quit emit BackToBrowseMsg instead of tea.Quit
+	// so an owning AppModel can restore browse mode.
+	returnToBrowse bool
 }
 
 type fileChangedMsg struct{}
@@ -139,6 +143,16 @@ func NewWorkspaceModel(ws *workspace.Workspace, q leetcode.Question, editor stri
 	m.watcher = w
 
 	return m, nil
+}
+
+// Close stops the file watcher. Safe to call more than once.
+func (m *WorkspaceModel) Close() {
+	if m == nil || m.watcher == nil {
+		return
+	}
+	w := m.watcher
+	m.watcher = nil
+	w.Close()
 }
 
 // EnableImages turns on inline statement images. iw must be the same
@@ -420,12 +434,12 @@ func (m *WorkspaceModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *WorkspaceModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch {
-	case key.Matches(msg, m.keys.Quit):
-		m.watcher.Close()
+	case key.Matches(msg, m.keys.Quit), key.Matches(msg, m.keys.Back):
+		m.Close()
+		if m.returnToBrowse {
+			return m, func() tea.Msg { return BackToBrowseMsg{} }
+		}
 		return m, tea.Quit
-	case key.Matches(msg, m.keys.Back):
-		m.watcher.Close()
-		return m, tea.Quit // Phase 2: return to browse mode instead
 	case key.Matches(msg, m.keys.Help):
 		m.showHelp = !m.showHelp
 		return m, nil
@@ -779,7 +793,7 @@ func (m *WorkspaceModel) renderHelp() string {
 		{"R", "run on LeetCode (needs `lazyleet auth`)"},
 		{"s", "submit to LeetCode (needs `lazyleet auth`)"},
 		{"i", "import the last failing case as a local test"},
-		{"b", "back"}, {"?", "toggle this help"}, {"q", "quit"},
+		{"b", "back"}, {"?", "toggle this help"}, {"q", "back to browse"},
 	}
 	var b strings.Builder
 	b.WriteString(m.th.TitleFocused.Render("lazyleet — workspace") + "\n\n")

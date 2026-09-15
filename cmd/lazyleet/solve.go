@@ -45,39 +45,7 @@ func newSolveCmd(app *appContext) *cobra.Command {
 // openWorkspace resolves a problem, scaffolds its workspace directory, and runs
 // the workspace TUI until the user exits it.
 func (a *appContext) openWorkspace(ctx context.Context, slug, lang string, refresh bool) error {
-	q, src, err := a.resolveQuestion(ctx, slug, refresh)
-	if err != nil {
-		return err
-	}
-	fmt.Fprintf(os.Stderr, "loaded %s (%s)\n", slug, src)
-
-	if err := a.paths.EnsureDirs(); err != nil {
-		return err
-	}
-	if lang == "" {
-		lang = a.cfg.DefaultLanguage
-	}
-	if _, ok := q.CodeSnippets[lang]; !ok {
-		picked := pickLanguage(q.CodeSnippets, lang)
-		if picked == "" {
-			return fmt.Errorf("no starter code available for %s", slug)
-		}
-		fmt.Fprintf(os.Stderr, "no %s starter; using %s\n", lang, picked)
-		lang = picked
-	}
-
-	ws, err := workspace.Scaffold(a.paths.WorkspaceRoot, q, lang)
-	if err != nil {
-		return err
-	}
-
-	m, err := tui.NewWorkspaceModel(
-		ws, q,
-		a.cfg.ResolveEditor(),
-		a.cfg.Workspace.RunOnSave,
-		a.cfg.Workspace.RunDebounceMs,
-		newRemoteJudge(a, q, lang),
-	)
+	m, err := a.buildWorkspaceModel(ctx, slug, lang, refresh)
 	if err != nil {
 		return err
 	}
@@ -89,6 +57,44 @@ func (a *appContext) openWorkspace(ctx context.Context, slug, lang string, refre
 		tea.WithFilter(tui.WheelEdgeFilter), tea.WithOutput(iw),
 	).Run()
 	return err
+}
+
+// buildWorkspaceModel resolves a problem and returns a ready WorkspaceModel
+// without running the TUI. Used by both `solve` and the browse AppModel.
+func (a *appContext) buildWorkspaceModel(ctx context.Context, slug, lang string, refresh bool) (*tui.WorkspaceModel, error) {
+	q, src, err := a.resolveQuestion(ctx, slug, refresh)
+	if err != nil {
+		return nil, err
+	}
+	fmt.Fprintf(os.Stderr, "loaded %s (%s)\n", slug, src)
+
+	if err := a.paths.EnsureDirs(); err != nil {
+		return nil, err
+	}
+	if lang == "" {
+		lang = a.cfg.DefaultLanguage
+	}
+	if _, ok := q.CodeSnippets[lang]; !ok {
+		picked := pickLanguage(q.CodeSnippets, lang)
+		if picked == "" {
+			return nil, fmt.Errorf("no starter code available for %s", slug)
+		}
+		fmt.Fprintf(os.Stderr, "no %s starter; using %s\n", lang, picked)
+		lang = picked
+	}
+
+	ws, err := workspace.Scaffold(a.paths.WorkspaceRoot, q, lang)
+	if err != nil {
+		return nil, err
+	}
+
+	return tui.NewWorkspaceModel(
+		ws, q,
+		a.cfg.ResolveEditor(),
+		a.cfg.Workspace.RunOnSave,
+		a.cfg.Workspace.RunDebounceMs,
+		newRemoteJudge(a, q, lang),
+	)
 }
 
 // resolveQuestion returns problem detail from the first available source:
