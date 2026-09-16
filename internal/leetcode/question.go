@@ -6,11 +6,14 @@ import "github.com/sven97/lazyleet/internal/testcase"
 // The Phase 1 API client will populate this from LeetCode's GraphQL; until then
 // Fixture provides bundled samples so the workspace UI can be built and tested.
 type Question struct {
-	FrontendID int      // the number shown to users (e.g. 1 for Two Sum)
-	QuestionID int      // LeetCode's internal id, needed for run/submit
-	Slug       string   // URL slug, e.g. "two-sum"
-	Title      string   // "Two Sum"
-	Difficulty string   // Easy | Medium | Hard
+	FrontendID int     // the number shown to users (e.g. 1 for Two Sum)
+	QuestionID int     // LeetCode's internal id, needed for run/submit
+	Slug       string  // URL slug, e.g. "two-sum"
+	Title      string  // "Two Sum"
+	Difficulty string  // Easy | Medium | Hard
+	ACRate     float64 // acceptance percentage, 0..100
+	PaidOnly   bool
+	Tags       []string // topic tags (display names)
 	Hints      []string // Markdown hints, revealed only on request
 	// HintsFetched reports whether Hints reflects an actual attempt to read
 	// hints from LeetCode (possibly finding none), as opposed to a cached

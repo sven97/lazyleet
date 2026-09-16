@@ -80,6 +80,7 @@ type questionDataResp struct {
 		Title            string      `json:"title"`
 		Slug             string      `json:"slug"`
 		Difficulty       string      `json:"difficulty"`
+		ACRate           float64     `json:"acRate"`
 		PaidOnly         bool        `json:"paidOnly"`
 		Status           *string     `json:"status"`
 		Content          string      `json:"content"`
@@ -127,12 +128,20 @@ func (c *Client) QuestionDetail(ctx context.Context, slug string) (Question, err
 		snippets[s.LangSlug] = s.Code
 	}
 
+	tags := make([]string, 0, len(q.TopicTags))
+	for _, t := range q.TopicTags {
+		tags = append(tags, t.Name)
+	}
+
 	out := Question{
 		FrontendID:       parseFrontendID(q.FrontendID),
 		QuestionID:       atoiSafe(q.QuestionID.String()),
 		Slug:             q.Slug,
 		Title:            q.Title,
 		Difficulty:       titleCaseDifficulty(q.Difficulty),
+		ACRate:           q.ACRate,
+		PaidOnly:         q.PaidOnly,
+		Tags:             tags,
 		Statement:        strings.TrimSpace(statement) + "\n",
 		Meta:             meta,
 		CodeSnippets:     snippets,
