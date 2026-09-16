@@ -111,6 +111,7 @@ type BrowseModel struct {
 	syncing      bool
 	autoSynced   bool // guards the one-shot progress sync on browse open
 	progressing  bool // a background SyncProgress is in flight
+	awaitSignIn  bool // auth just flipped to true; confirm once loadUser resolves
 	statusMsg    string
 	loadErr      error
 	lastSync     time.Time // full problem catalog
@@ -370,6 +371,7 @@ func (m *BrowseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case authLoadedMsg:
 		if m.auth.Authed != msg.a.Authed {
 			m.rearmAutoSync()
+			m.awaitSignIn = msg.a.Authed // false->true edge only
 		}
 		m.auth = msg.a
 		var cmds []tea.Cmd
@@ -380,6 +382,8 @@ func (m *BrowseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case userLoadedMsg:
+		awaitSignIn := m.awaitSignIn
+		m.awaitSignIn = false
 		if msg.err != nil {
 			m.statusMsg = "could not verify session: " + msg.err.Error()
 		} else if msg.name == "" && m.auth.Authed {
@@ -388,6 +392,13 @@ func (m *BrowseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.statusMsg = "session expired — run `lazyleet auth`, then press s"
 		} else {
 			m.auth.User = msg.name
+			// The Status pane already shows "✓ <user>" persistently once
+			// authed — only echo it here (single-pane/zoomed layout, same
+			// condition the footer's sync-age fallback uses) where that pane
+			// isn't actually on screen to notice for you.
+			if awaitSignIn && m.layout.Single && m.focus != RegionStatus {
+				m.statusMsg = "signed in as " + msg.name
+			}
 		}
 		return m, m.refreshDetail()
 
@@ -670,7 +681,6 @@ func (m *BrowseModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if !m.syncing && !m.progressing {
 			m.rearmAutoSync()
 			m.syncing = true
-			m.statusMsg = "syncing…"
 			return m, tea.Batch(m.syncCmd(), m.spin.Tick)
 		}
 		return m, nil
@@ -705,7 +715,7 @@ func (m *BrowseModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.afterListChange()
 	case key.Matches(msg, m.keys.FilterStatus):
 		if !m.auth.Authed {
-			m.statusMsg = "for your solve progress, run `lazyleet auth` in another terminal, then press s"
+			m.statusMsg = "sign in (`lazyleet auth`), then press s to sync progress"
 		}
 		m.fltStatus = cycleStatus(m.fltStatus)
 		return m.afterListChange()
