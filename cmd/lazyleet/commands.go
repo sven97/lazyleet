@@ -158,19 +158,14 @@ func newDebugCmd(app *appContext) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			out := cmd.OutOrStdout()
-			db, err := app.openStore()
+			client, err := app.newClient()
 			if err != nil {
 				return err
 			}
-			defer db.Close()
-			result, err := resolvePlan(cmd.Context(), db, args[0], app.cfg.CacheTTL.D(), false, app.fetchPlan)
+			plan, err := client.StudyPlanDetail(cmd.Context(), args[0])
 			if err != nil {
 				return err
 			}
-			if result.refreshErr != nil {
-				fmt.Fprintf(cmd.ErrOrStderr(), "using cached plan; refresh failed: %v\n", result.refreshErr)
-			}
-			plan := result.plan
 			fmt.Fprintf(out, "%s (%s) — %d problems\n", plan.Name, plan.Slug, len(plan.Questions))
 			tw := tabwriter.NewWriter(out, 0, 2, 2, ' ', 0)
 			defer tw.Flush()

@@ -139,8 +139,7 @@ Requires Go 1.27+. The SQLite driver is pure Go, so no C toolchain is needed.
 ## Usage (so far)
 
 ```sh
-lazyleet sync                 # cache the full problem list + bundled study plans
-lazyleet sync --plans         # also prefetch official plans for offline use
+lazyleet sync                 # cache the full problem list + study plans locally
 lazyleet                      # browse mode: sidebar · list · preview
                               #   / fuzzy filter · d/f/p filter · S sort · c clear
                               #   tab panes · enter opens workspace · s sync · ? help
@@ -168,10 +167,6 @@ lazyleet --version
 
 Problem data is read from a bundled fixture, then the local SQLite cache, then
 LeetCode (no login required for public problems; results are cached afterwards).
-Official study plans refresh according to `cache_ttl`; if a refresh fails,
-browse and `debug plan` can still use the cached plan. `sync --plans` checks
-plans even when the problem catalog is fresh; add `--force` to refresh both.
-A failed prefetch reports an error while keeping previously cached plans.
 
 In the workspace: `e` edit in `$EDITOR` · `r` run local tests · `R` run on
 LeetCode · `s` submit · `i` import the last failing case · `tab` switch pane ·

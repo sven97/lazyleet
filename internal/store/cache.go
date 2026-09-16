@@ -15,12 +15,11 @@ var ErrNotCached = errors.New("not cached")
 
 // StudyPlan is a cached study plan (ordered slug list plus display name).
 type StudyPlan struct {
-	Slug          string
-	Name          string
-	Source        string // leetcode | bundled
-	Problems      []string
-	FetchedAt     time.Time
-	QuestionsJSON string // ordered question metadata, including official groups
+	Slug      string
+	Name      string
+	Source    string // leetcode | bundled
+	Problems  []string
+	FetchedAt time.Time
 }
 
 // PutStudyPlan upserts a plan.
@@ -30,12 +29,12 @@ func (s *Store) PutStudyPlan(ctx context.Context, p StudyPlan) error {
 		return err
 	}
 	_, err = s.db.ExecContext(ctx, `
-INSERT INTO study_plans (slug, name, source, problems, fetched_at, questions)
-VALUES (?, ?, ?, ?, ?, ?)
+INSERT INTO study_plans (slug, name, source, problems, fetched_at)
+VALUES (?, ?, ?, ?, ?)
 ON CONFLICT(slug) DO UPDATE SET
     name = excluded.name, source = excluded.source,
-    problems = excluded.problems, fetched_at = excluded.fetched_at, questions = excluded.questions`,
-		p.Slug, p.Name, p.Source, string(blob), time.Now().Unix(), orJSONArray(p.QuestionsJSON))
+    problems = excluded.problems, fetched_at = excluded.fetched_at`,
+		p.Slug, p.Name, p.Source, string(blob), time.Now().Unix())
 	return err
 }
 
@@ -47,8 +46,8 @@ func (s *Store) GetStudyPlan(ctx context.Context, slug string) (StudyPlan, error
 		fetchedAt int64
 	)
 	err := s.db.QueryRowContext(ctx,
-		`SELECT slug, name, source, problems, fetched_at, questions FROM study_plans WHERE slug = ?`, slug).
-		Scan(&p.Slug, &p.Name, &p.Source, &probJSON, &fetchedAt, &p.QuestionsJSON)
+		`SELECT slug, name, source, problems, fetched_at FROM study_plans WHERE slug = ?`, slug).
+		Scan(&p.Slug, &p.Name, &p.Source, &probJSON, &fetchedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return StudyPlan{}, ErrNotCached
 	}
@@ -56,9 +55,7 @@ func (s *Store) GetStudyPlan(ctx context.Context, slug string) (StudyPlan, error
 		return StudyPlan{}, err
 	}
 	p.FetchedAt = time.Unix(fetchedAt, 0)
-	if err := json.Unmarshal([]byte(probJSON), &p.Problems); err != nil {
-		return StudyPlan{}, err
-	}
+	_ = json.Unmarshal([]byte(probJSON), &p.Problems)
 	return p, nil
 }
 
