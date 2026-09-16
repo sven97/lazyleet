@@ -77,4 +77,6 @@ CREATE TABLE workspace_state (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );`,
+	// 4: preserve official plan groups and problem metadata for offline debug output.
+	`ALTER TABLE study_plans ADD COLUMN questions TEXT NOT NULL DEFAULT '[]';`,
 }

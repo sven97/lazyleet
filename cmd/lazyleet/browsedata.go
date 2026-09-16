@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/sven97/lazyleet/internal/leetcode"
@@ -191,29 +190,15 @@ func (b *browseData) Plans(ctx context.Context) ([]tui.PlanRef, error) {
 }
 
 func (b *browseData) PlanSlugs(ctx context.Context, ref tui.PlanRef) ([]string, error) {
-	if !ref.Official {
-		if bp, ok := plans.Get(ref.Slug); ok {
-			return bp.Problems, nil
-		}
-		return nil, fmt.Errorf("unknown bundled plan %q", ref.Slug)
-	}
-	if sp, err := b.db.GetStudyPlan(ctx, ref.Slug); err == nil && len(sp.Problems) > 0 {
-		return sp.Problems, nil
-	}
-	client, err := b.app.newClient()
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	result, err := resolvePlan(ctx, b.db, ref.Slug, b.app.cfg.CacheTTL.D(), false, b.app.fetchPlan)
 	if err != nil {
 		return nil, err
 	}
-	plan, err := client.StudyPlanDetail(ctx, ref.Slug)
-	if err != nil {
-		return nil, err
-	}
-	slugs := make([]string, len(plan.Questions))
-	for i, q := range plan.Questions {
+	slugs := make([]string, len(result.plan.Questions))
+	for i, q := range result.plan.Questions {
 		slugs[i] = q.Slug
 	}
-	_ = b.db.PutStudyPlan(ctx, store.StudyPlan{
-		Slug: ref.Slug, Name: plan.Name, Source: "leetcode", Problems: slugs,
-	})
 	return slugs, nil
 }

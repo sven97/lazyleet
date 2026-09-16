@@ -62,6 +62,7 @@ func (k KeyMap) shortcutHints() []hint {
 		{k.RunLC.Help().Key, k.RunLC.Help().Desc},
 		{k.Submit.Help().Key, k.Submit.Help().Desc},
 		{k.Import.Help().Key, "import"}, // full desc ("import failing case") is in `?` help
+		{k.Tests.Help().Key, k.Tests.Help().Desc},
 		{k.History.Help().Key, k.History.Help().Desc},
 		{k.NextPane.Help().Key, k.NextPane.Help().Desc},
 		{k.Zoom.Help().Key, k.Zoom.Help().Desc},
