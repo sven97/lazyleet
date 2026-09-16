@@ -110,6 +110,15 @@ func TestHistoryRecordsErrorsAndDoesNotReplaceJudgeResult(t *testing.T) {
 	if m.lastRun == nil || !m.lastRun.OK() || !strings.Contains(m.statusMsg, "could not save attempt history") {
 		t.Fatal("save failure replaced judge success")
 	}
+
+	// A remote verdict already carries a status-bar summary; a subsequent
+	// history-save failure must fold into it, not clobber it.
+	m.remote = historyRemote{}
+	msg = m.remoteCmd("submit")()
+	m.Update(msg)
+	if !strings.Contains(m.statusMsg, "Accepted") || !strings.Contains(m.statusMsg, "disk full") {
+		t.Fatalf("history save failure hid the submit verdict: %q", m.statusMsg)
+	}
 }
 
 func TestLocalHistoryVerdicts(t *testing.T) {
@@ -153,6 +162,9 @@ func TestHistoryViewNavigationEmptyFailureAndLongDetails(t *testing.T) {
 		m.Update(tea.WindowSizeMsg{Width: size[0], Height: size[1]})
 		if lipgloss.Width(m.View()) > size[0] || lipgloss.Height(m.View()) > size[1] {
 			t.Fatal("history detail overflow")
+		}
+		if m.historyVP.YOffset == 0 {
+			t.Fatal("resize reset scroll position")
 		}
 	}
 	m.Update(tea.KeyMsg{Type: tea.KeyEsc})

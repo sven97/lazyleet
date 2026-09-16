@@ -121,6 +121,19 @@ type remoteDoneMsg struct {
 	err        error
 }
 
+// withHistoryErr folds a history-save failure into a status message without
+// clobbering a verdict summary already sitting there: with no verdict it's
+// just the save failure, otherwise both are kept on one line.
+func withHistoryErr(verdict string, historyErr error) string {
+	if historyErr == nil {
+		return verdict
+	}
+	if verdict == "" {
+		return "could not save attempt history: " + historyErr.Error()
+	}
+	return verdict + " (history not saved: " + historyErr.Error() + ")"
+}
+
 // NewWorkspaceModel builds the model. It starts the file watcher; call Close
 // (via the returned model after Run) is not needed — the watcher is closed when
 // the program exits through tea.Quit handling.
@@ -411,7 +424,7 @@ func (m *WorkspaceModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.relayout()
 		m.ready = true
 		if m.historyDetail {
-			m.sizeHistoryDetail()
+			m.resizeHistoryDetail()
 		}
 		return m, nil
 
@@ -437,9 +450,7 @@ func (m *WorkspaceModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			r := msg.res
 			m.lastRun = &r
 		}
-		if msg.historyErr != nil {
-			m.statusMsg = "could not save attempt history: " + msg.historyErr.Error()
-		}
+		m.statusMsg = withHistoryErr(m.statusMsg, msg.historyErr)
 		m.refreshResults()
 		if m.showHistory && !m.historyDetail {
 			return m, m.loadHistory()
@@ -474,9 +485,7 @@ func (m *WorkspaceModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.progressChanged = true
 			}
 		}
-		if msg.historyErr != nil {
-			m.statusMsg = "could not save attempt history: " + msg.historyErr.Error()
-		}
+		m.statusMsg = withHistoryErr(m.statusMsg, msg.historyErr)
 		m.refreshResults()
 		if m.showHistory && !m.historyDetail {
 			return m, m.loadHistory()

@@ -156,13 +156,41 @@ func (m *WorkspaceModel) handleHistoryKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// sizeHistoryDetail (re)builds the detail viewport for the currently
+// selected history entry, sized to the current terminal dimensions. It
+// always starts scroll at the top, so it's for opening detail view (or
+// switching to a different entry) — not for a plain resize while an entry
+// is already open; use resizeHistoryDetail for that so YOffset survives.
 func (m *WorkspaceModel) sizeHistoryDetail() {
 	if !m.historyDetail || len(m.historyEntries) == 0 {
 		return
 	}
-	e := m.historyEntries[m.historyCursor]
 	m.historyVP = viewport.New(max(1, m.width), max(1, m.height-3))
 	m.historyVP.MouseWheelEnabled = true
+	m.setHistoryDetailContent()
+}
+
+// resizeHistoryDetail adjusts the existing history-detail viewport to the
+// current terminal dimensions, following the same convention as relayout():
+// construct the viewport once, and on subsequent resizes just update its
+// Width/Height so scroll position (YOffset) is preserved.
+func (m *WorkspaceModel) resizeHistoryDetail() {
+	if !m.historyDetail || len(m.historyEntries) == 0 {
+		return
+	}
+	if m.historyVP.Width == 0 && m.historyVP.Height == 0 {
+		m.sizeHistoryDetail()
+		return
+	}
+	m.historyVP.Width, m.historyVP.Height = max(1, m.width), max(1, m.height-3)
+	m.setHistoryDetailContent()
+}
+
+// setHistoryDetailContent (re)wraps and sets the viewport's content for the
+// currently selected entry at the viewport's current width, without
+// touching YOffset (SetContent only clamps it if it now exceeds the content).
+func (m *WorkspaceModel) setHistoryDetailContent() {
+	e := m.historyEntries[m.historyCursor]
 	body := fmt.Sprintf("%s · %s · %s\n%s\n%d/%d passed\n", e.CreatedAt.Local().Format("2006-01-02 15:04:05"), e.Kind, e.Lang, e.Verdict, e.Passed, e.Total)
 	if e.Runtime != "" {
 		body += "Runtime: " + e.Runtime + "\n"
