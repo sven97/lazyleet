@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/sven97/lazyleet/internal/attempt"
 	"github.com/sven97/lazyleet/internal/leetcode"
 	"github.com/sven97/lazyleet/internal/runner"
 	"github.com/sven97/lazyleet/internal/termimg"
@@ -80,10 +81,19 @@ type WorkspaceModel struct {
 	// submission's one failing case) turned out not to work.
 	remoteRunCases []testcase.Case
 
-	watcher   *workspace.Watcher
-	statusMsg string
-	showHelp  bool
-	cases     *caseManager
+	watcher           *workspace.Watcher
+	statusMsg         string
+	showHelp          bool
+	cases             *caseManager
+	history           attempt.Repository
+	showHistory       bool
+	historyGeneration int
+	historyLoading    bool
+	historyDetail     bool
+	historyCursor     int
+	historyEntries    []attempt.Entry
+	historyErr        error
+	historyVP         viewport.Model
 
 	// pendingRunNote overrides the generic "local: N/M passed" status-bar
 	// summary the next time a run finishes — used by an auto-triggered run
@@ -110,13 +120,28 @@ type fileChangedMsg struct{}
 type runDebounceMsg struct{ gen int }
 type runFinishedMsg struct {
 	casesRevision int
+	historyErr    error
 	res           runner.Result
 	err           error
 }
 type editorFinishedMsg struct{ err error }
 type remoteDoneMsg struct {
-	out RemoteOutcome
-	err error
+	historyErr error
+	out        RemoteOutcome
+	err        error
+}
+
+// withHistoryErr folds a history-save failure into a status message without
+// clobbering a verdict summary already sitting there: with no verdict it's
+// just the save failure, otherwise both are kept on one line.
+func withHistoryErr(verdict string, historyErr error) string {
+	if historyErr == nil {
+		return verdict
+	}
+	if verdict == "" {
+		return "could not save attempt history: " + historyErr.Error()
+	}
+	return verdict + " (history not saved: " + historyErr.Error() + ")"
 }
 
 // NewWorkspaceModel builds the model. It starts the file watcher; call Close
@@ -257,19 +282,25 @@ func (m *WorkspaceModel) waitForFileChange() tea.Cmd {
 func (m *WorkspaceModel) runCmd() tea.Cmd {
 	ws := m.ws
 	meta := m.q.Meta
+	repo, driver := m.history, m.runner
 	revision := m.casesRevision
 	return func() tea.Msg {
+		started := time.Now()
+		finish := func(res runner.Result, err error) tea.Msg {
+			historyErr := recordAttempt(repo, localAttempt(ws.Slug, ws.Lang, started, res, err))
+			return runFinishedMsg{casesRevision: revision, res: res, err: err, historyErr: historyErr}
+		}
 		cases, err := ws.ReadCases()
 		if err != nil {
-			return runFinishedMsg{casesRevision: revision, err: fmt.Errorf("read test cases: %w", err)}
+			return finish(runner.Result{}, fmt.Errorf("read test cases: %w", err))
 		}
-		res, err := m.runner.Run(context.Background(), runner.Spec{
+		res, err := driver.Run(context.Background(), runner.Spec{
 			Lang:         ws.Lang,
 			SolutionPath: ws.SolutionPath,
 			Meta:         meta,
 			Cases:        cases,
 		})
-		return runFinishedMsg{casesRevision: revision, res: res, err: err}
+		return finish(res, err)
 	}
 }
 
@@ -320,11 +351,17 @@ func (m *WorkspaceModel) startRemote(kind string) (tea.Model, tea.Cmd) {
 func (m *WorkspaceModel) remoteCmd(kind string) tea.Cmd {
 	ws := m.ws
 	remote := m.remote
+	repo := m.history
 	input := m.remoteDataInput()
 	return func() tea.Msg {
+		started := time.Now()
+		finish := func(out RemoteOutcome, err error) tea.Msg {
+			historyErr := recordAttempt(repo, remoteAttempt(ws.Slug, ws.Lang, kind, started, out, err))
+			return remoteDoneMsg{out: out, err: err, historyErr: historyErr}
+		}
 		code, err := ws.ReadSolution()
 		if err != nil {
-			return remoteDoneMsg{err: err}
+			return finish(RemoteOutcome{}, err)
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 		defer cancel()
@@ -334,7 +371,7 @@ func (m *WorkspaceModel) remoteCmd(kind string) tea.Cmd {
 		} else {
 			out, err = remote.Run(ctx, code, input)
 		}
-		return remoteDoneMsg{out: out, err: err}
+		return finish(out, err)
 	}
 }
 
@@ -412,6 +449,9 @@ func (m *WorkspaceModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.relayout()
 		m.sizeCaseForm()
 		m.ready = true
+		if m.historyDetail {
+			m.resizeHistoryDetail()
+		}
 		return m, nil
 
 	case tea.KeyMsg:
@@ -454,7 +494,11 @@ func (m *WorkspaceModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// just as visible at a glance if you're not looking at Results.
 			m.statusMsg = localRunSummary(*m.lastRun)
 		}
+		m.statusMsg = withHistoryErr(m.statusMsg, msg.historyErr)
 		m.refreshResults()
+		if m.showHistory && !m.historyDetail {
+			return m, m.loadHistory()
+		}
 		return m, nil
 
 	case editorFinishedMsg:
@@ -485,7 +529,23 @@ func (m *WorkspaceModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.progressChanged = true
 			}
 		}
+		m.statusMsg = withHistoryErr(m.statusMsg, msg.historyErr)
 		m.refreshResults()
+		if m.showHistory && !m.historyDetail {
+			return m, m.loadHistory()
+		}
+		return m, nil
+
+	case historyLoadedMsg:
+		if msg.slug != m.ws.Slug || msg.generation != m.historyGeneration {
+			return m, nil
+		}
+		m.historyLoading = false
+		m.historyErr = msg.err
+		if msg.err == nil {
+			m.historyEntries = msg.entries
+			m.historyCursor = min(m.historyCursor, max(0, len(msg.entries)-1))
+		}
 		return m, nil
 
 	case spinner.TickMsg:
@@ -510,6 +570,9 @@ func (m *WorkspaceModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *WorkspaceModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.showHistory {
+		return m.handleHistoryKey(msg)
+	}
 	if m.cases != nil {
 		return m.handleCaseKey(msg)
 	}
@@ -552,6 +615,10 @@ func (m *WorkspaceModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.startRemote("submit")
 	case key.Matches(msg, m.keys.Import):
 		return m.importFailingCase()
+	case key.Matches(msg, m.keys.History):
+		m.showHistory = true
+		m.historyDetail = false
+		return m, m.loadHistory()
 	case key.Matches(msg, m.keys.Tests):
 		return m.openCaseManager()
 	case key.Matches(msg, m.keys.Up):
@@ -616,6 +683,15 @@ func (m *WorkspaceModel) paneAt(x, y int) (Pane, bool) {
 // cursor is already at the top (wheel-up) or bottom (wheel-down) of its content.
 // See WheelEdgeFilter.
 func (m *WorkspaceModel) wheelAtEdge(msg tea.MouseMsg) bool {
+	if m.showHistory {
+		if !m.historyDetail {
+			return true
+		}
+		if msg.Button == tea.MouseButtonWheelUp {
+			return m.historyVP.AtTop()
+		}
+		return m.historyVP.AtBottom()
+	}
 	if msg.Button != tea.MouseButtonWheelUp && msg.Button != tea.MouseButtonWheelDown {
 		return true // horizontal wheel never scrolls a vertical pane
 	}
@@ -631,6 +707,14 @@ func (m *WorkspaceModel) wheelAtEdge(msg tea.MouseMsg) bool {
 }
 
 func (m *WorkspaceModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	if m.showHistory {
+		if m.historyDetail {
+			var cmd tea.Cmd
+			m.historyVP, cmd = m.historyVP.Update(msg)
+			return m, cmd
+		}
+		return m, nil
+	}
 	if m.cases != nil {
 		return m, nil
 	}
@@ -763,6 +847,9 @@ func (m *WorkspaceModel) View() (out string) {
 	if !m.ready {
 		return "loading workspace…"
 	}
+	if m.showHistory {
+		return m.historyView()
+	}
 	if m.cases != nil {
 		return m.caseManagerView()
 	}
@@ -881,6 +968,7 @@ func (m *WorkspaceModel) renderHelp() string {
 		{"s", "submit to LeetCode (needs `lazyleet auth`)"},
 		{"i", "import the last failing case as a local test"},
 		{"t", "manage test cases (add, edit, delete)"},
+		{"a", "recent local and remote attempt history"},
 		{"b", "back"}, {"?", "toggle this help"}, {"q", "back to browse"},
 	}
 	var b strings.Builder

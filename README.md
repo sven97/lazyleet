@@ -209,6 +209,19 @@ cases. Saves preserve comments and untouched cases in `testcases.jsonl` and
 replace the file atomically. If another editor changed the file, cancel the
 edit and press `r` in the manager to reload before trying again.
 
+### Attempt history
+
+Press `a` in a workspace (outside the test-case manager, where `a` instead
+adds a case) to see its latest 50 local runs, LeetCode runs, and submissions,
+across languages. Use arrow keys or `j`/`k` to select an attempt, Enter for
+details, `r` to reload, and Esc to return. History includes verdicts, pass
+counts, runtime/memory when available, judge IDs, and diagnostic output.
+
+Attempts, including run-on-save and failed requests, are stored in the local
+SQLite database and remain available offline after restarting. A history-write
+failure is reported without replacing the judge result. Solution snapshots and auth
+credentials are not recorded; diagnostic output can include compiler excerpts.
+
 ### Local judge languages
 
 | Language | Local `r` | Notes |
