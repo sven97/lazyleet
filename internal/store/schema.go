@@ -77,7 +77,9 @@ CREATE TABLE workspace_state (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );`,
-	// 4: distinguish "hints fetched but genuinely empty" from "cached before
+	// 4: preserve official plan groups and problem metadata for offline debug output.
+	`ALTER TABLE study_plans ADD COLUMN questions TEXT NOT NULL DEFAULT '[]';`,
+	// 5: distinguish "hints fetched but genuinely empty" from "cached before
 	// hints support existed" — the hints column alone can't tell those apart,
 	// since both end up as '[]'.
 	`ALTER TABLE problem_detail ADD COLUMN hints_fetched INTEGER NOT NULL DEFAULT 0;`,
