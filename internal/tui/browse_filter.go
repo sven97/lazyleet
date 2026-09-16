@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"sort"
 	"strings"
 )
@@ -32,6 +33,7 @@ type listFilter struct {
 	difficulty string // "", "Easy", "Medium", "Hard"
 	status     string // "", "ac", "unsolved", "attempted"
 	hidePaid   bool
+	tags       []string // all selected tags must match
 }
 
 func (f listFilter) chips() []string {
@@ -49,6 +51,9 @@ func (f listFilter) chips() []string {
 	}
 	if f.hidePaid {
 		c = append(c, "no-paid")
+	}
+	if len(f.tags) > 0 {
+		c = append(c, "tags: "+strings.Join(f.tags, " + "))
 	}
 	return c
 }
@@ -117,6 +122,16 @@ func applyListFilterSort(rows []BrowseRow, f listFilter, sortMode int) []BrowseR
 				continue
 			}
 		}
+		matchesTags := true
+		for _, tag := range f.tags {
+			if !slices.Contains(r.Tags, tag) {
+				matchesTags = false
+				break
+			}
+		}
+		if !matchesTags {
+			continue
+		}
 		out = append(out, r)
 	}
 
@@ -149,9 +164,9 @@ func (m *BrowseModel) filterSummary() string {
 }
 
 func (m *BrowseModel) listFilterState() listFilter {
-	return listFilter{difficulty: m.fltDiff, status: m.fltStatus, hidePaid: m.fltHidePaid}
+	return listFilter{difficulty: m.fltDiff, status: m.fltStatus, hidePaid: m.fltHidePaid, tags: m.fltTags}
 }
 
 func (m *BrowseModel) listFilterDirty() bool {
-	return m.fltDiff != "" || m.fltStatus != "" || m.fltHidePaid || m.sortMode != sortByID
+	return len(m.fltTags) > 0 || m.fltDiff != "" || m.fltStatus != "" || m.fltHidePaid || m.sortMode != sortByID
 }
