@@ -179,6 +179,18 @@ If the post-login refresh fails, credentials remain saved; retry with
 `lazyleet sync --progress`. The workspace lives at
 `$XDG_DATA_HOME/lazyleet/workspace/<id>-<slug>/`.
 
+### Attempt history
+
+Press `a` in a workspace to see its latest 50 local runs, LeetCode runs, and
+submissions, across languages. Use arrow keys or `j`/`k` to select an attempt,
+Enter for details, `r` to reload, and Esc to return. History includes verdicts,
+pass counts, runtime/memory when available, judge IDs, and diagnostic output.
+
+Attempts, including run-on-save and failed requests, are stored in the local
+SQLite database and remain available offline after restarting. A history-write
+failure is reported without replacing the judge result. Solution snapshots and auth
+credentials are not recorded; diagnostic output can include compiler excerpts.
+
 ### Local judge languages
 
 | Language | Local `r` | Notes |

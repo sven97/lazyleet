@@ -88,13 +88,18 @@ func (a *appContext) buildWorkspaceModel(ctx context.Context, slug, lang string,
 		return nil, err
 	}
 
-	return tui.NewWorkspaceModel(
+	m, err := tui.NewWorkspaceModel(
 		ws, q,
 		a.cfg.ResolveEditor(),
 		a.cfg.Workspace.RunOnSave,
 		a.cfg.Workspace.RunDebounceMs,
 		newRemoteJudge(a, q, lang),
 	)
+	if err != nil {
+		return nil, err
+	}
+	m.SetHistory(attemptHistory{app: a})
+	return m, nil
 }
 
 // resolveQuestion returns problem detail from the first available source:

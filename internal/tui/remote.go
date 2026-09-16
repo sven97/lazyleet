@@ -5,6 +5,7 @@ import "context"
 // RemoteOutcome is the result of running or submitting against LeetCode's judge,
 // mapped out of the leetcode package so tui stays transport-agnostic.
 type RemoteOutcome struct {
+	RemoteID   string // interpret or submission ID, retained even if polling fails
 	Kind       string // "run" | "submit"
 	Verdict    string // human-readable, e.g. "Accepted", "Wrong Answer"
 	Accepted   bool

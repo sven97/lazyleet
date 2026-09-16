@@ -92,9 +92,11 @@ func (r *remoteJudge) Run(ctx context.Context, code, dataInput string) (tui.Remo
 	}
 	res, err := client.PollResult(ctx, r.slug, ir.InterpretID, nil)
 	if err != nil {
-		return tui.RemoteOutcome{}, err
+		return tui.RemoteOutcome{RemoteID: ir.InterpretID}, err
 	}
-	return mapOutcome("run", res), nil
+	out := mapOutcome("run", res)
+	out.RemoteID = ir.InterpretID
+	return out, nil
 }
 
 func (r *remoteJudge) Submit(ctx context.Context, code string) (tui.RemoteOutcome, error) {
@@ -108,9 +110,10 @@ func (r *remoteJudge) Submit(ctx context.Context, code string) (tui.RemoteOutcom
 	}
 	res, err := client.PollResult(ctx, r.slug, fmt.Sprint(sr.SubmissionID), nil)
 	if err != nil {
-		return tui.RemoteOutcome{}, err
+		return tui.RemoteOutcome{RemoteID: fmt.Sprint(sr.SubmissionID)}, err
 	}
 	out := mapOutcome("submit", res)
+	out.RemoteID = fmt.Sprint(sr.SubmissionID)
 	if out.Accepted {
 		r.markSolved()
 	}

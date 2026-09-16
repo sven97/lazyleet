@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/sven97/lazyleet/internal/attempt"
 	"github.com/sven97/lazyleet/internal/leetcode"
 	"github.com/sven97/lazyleet/internal/runner"
 	"github.com/sven97/lazyleet/internal/termimg"
@@ -78,9 +79,18 @@ type WorkspaceModel struct {
 	// submission's one failing case) turned out not to work.
 	remoteRunCases []testcase.Case
 
-	watcher   *workspace.Watcher
-	statusMsg string
-	showHelp  bool
+	watcher           *workspace.Watcher
+	statusMsg         string
+	showHelp          bool
+	history           attempt.Repository
+	showHistory       bool
+	historyGeneration int
+	historyLoading    bool
+	historyDetail     bool
+	historyCursor     int
+	historyEntries    []attempt.Entry
+	historyErr        error
+	historyVP         viewport.Model
 
 	// returnToBrowse makes Back/Quit emit BackToBrowseMsg instead of tea.Quit
 	// so an owning AppModel can restore browse mode.
@@ -100,13 +110,15 @@ func (m *WorkspaceModel) ProgressChanged() bool { return m.progressChanged }
 type fileChangedMsg struct{}
 type runDebounceMsg struct{ gen int }
 type runFinishedMsg struct {
-	res runner.Result
-	err error
+	historyErr error
+	res        runner.Result
+	err        error
 }
 type editorFinishedMsg struct{ err error }
 type remoteDoneMsg struct {
-	out RemoteOutcome
-	err error
+	historyErr error
+	out        RemoteOutcome
+	err        error
 }
 
 // NewWorkspaceModel builds the model. It starts the file watcher; call Close
@@ -247,18 +259,24 @@ func (m *WorkspaceModel) waitForFileChange() tea.Cmd {
 func (m *WorkspaceModel) runCmd() tea.Cmd {
 	ws := m.ws
 	meta := m.q.Meta
+	repo, driver := m.history, m.runner
 	return func() tea.Msg {
+		started := time.Now()
+		finish := func(res runner.Result, err error) tea.Msg {
+			historyErr := recordAttempt(repo, localAttempt(ws.Slug, ws.Lang, started, res, err))
+			return runFinishedMsg{res: res, err: err, historyErr: historyErr}
+		}
 		cases, err := ws.ReadCases()
 		if err != nil {
-			return runFinishedMsg{err: fmt.Errorf("read test cases: %w", err)}
+			return finish(runner.Result{}, fmt.Errorf("read test cases: %w", err))
 		}
-		res, err := m.runner.Run(context.Background(), runner.Spec{
+		res, err := driver.Run(context.Background(), runner.Spec{
 			Lang:         ws.Lang,
 			SolutionPath: ws.SolutionPath,
 			Meta:         meta,
 			Cases:        cases,
 		})
-		return runFinishedMsg{res: res, err: err}
+		return finish(res, err)
 	}
 }
 
@@ -308,11 +326,17 @@ func (m *WorkspaceModel) startRemote(kind string) (tea.Model, tea.Cmd) {
 func (m *WorkspaceModel) remoteCmd(kind string) tea.Cmd {
 	ws := m.ws
 	remote := m.remote
+	repo := m.history
 	input := m.remoteDataInput()
 	return func() tea.Msg {
+		started := time.Now()
+		finish := func(out RemoteOutcome, err error) tea.Msg {
+			historyErr := recordAttempt(repo, remoteAttempt(ws.Slug, ws.Lang, kind, started, out, err))
+			return remoteDoneMsg{out: out, err: err, historyErr: historyErr}
+		}
 		code, err := ws.ReadSolution()
 		if err != nil {
-			return remoteDoneMsg{err: err}
+			return finish(RemoteOutcome{}, err)
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 		defer cancel()
@@ -322,7 +346,7 @@ func (m *WorkspaceModel) remoteCmd(kind string) tea.Cmd {
 		} else {
 			out, err = remote.Run(ctx, code, input)
 		}
-		return remoteDoneMsg{out: out, err: err}
+		return finish(out, err)
 	}
 }
 
@@ -386,6 +410,9 @@ func (m *WorkspaceModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width, m.height = msg.Width, msg.Height
 		m.relayout()
 		m.ready = true
+		if m.historyDetail {
+			m.sizeHistoryDetail()
+		}
 		return m, nil
 
 	case tea.KeyMsg:
@@ -410,7 +437,13 @@ func (m *WorkspaceModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			r := msg.res
 			m.lastRun = &r
 		}
+		if msg.historyErr != nil {
+			m.statusMsg = "could not save attempt history: " + msg.historyErr.Error()
+		}
 		m.refreshResults()
+		if m.showHistory && !m.historyDetail {
+			return m, m.loadHistory()
+		}
 		return m, nil
 
 	case editorFinishedMsg:
@@ -441,7 +474,25 @@ func (m *WorkspaceModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.progressChanged = true
 			}
 		}
+		if msg.historyErr != nil {
+			m.statusMsg = "could not save attempt history: " + msg.historyErr.Error()
+		}
 		m.refreshResults()
+		if m.showHistory && !m.historyDetail {
+			return m, m.loadHistory()
+		}
+		return m, nil
+
+	case historyLoadedMsg:
+		if msg.slug != m.ws.Slug || msg.generation != m.historyGeneration {
+			return m, nil
+		}
+		m.historyLoading = false
+		m.historyErr = msg.err
+		if msg.err == nil {
+			m.historyEntries = msg.entries
+			m.historyCursor = min(m.historyCursor, max(0, len(msg.entries)-1))
+		}
 		return m, nil
 
 	case spinner.TickMsg:
@@ -457,6 +508,9 @@ func (m *WorkspaceModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *WorkspaceModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.showHistory {
+		return m.handleHistoryKey(msg)
+	}
 	switch {
 	case key.Matches(msg, m.keys.Quit), key.Matches(msg, m.keys.Back):
 		m.Close()
@@ -496,6 +550,10 @@ func (m *WorkspaceModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.startRemote("submit")
 	case key.Matches(msg, m.keys.Import):
 		return m.importFailingCase()
+	case key.Matches(msg, m.keys.History):
+		m.showHistory = true
+		m.historyDetail = false
+		return m, m.loadHistory()
 	case key.Matches(msg, m.keys.Tests):
 		m.statusMsg = "test-case manager lands in Phase 4 — edit testcases.jsonl for now"
 		return m, nil
@@ -561,6 +619,15 @@ func (m *WorkspaceModel) paneAt(x, y int) (Pane, bool) {
 // cursor is already at the top (wheel-up) or bottom (wheel-down) of its content.
 // See WheelEdgeFilter.
 func (m *WorkspaceModel) wheelAtEdge(msg tea.MouseMsg) bool {
+	if m.showHistory {
+		if !m.historyDetail {
+			return true
+		}
+		if msg.Button == tea.MouseButtonWheelUp {
+			return m.historyVP.AtTop()
+		}
+		return m.historyVP.AtBottom()
+	}
 	if msg.Button != tea.MouseButtonWheelUp && msg.Button != tea.MouseButtonWheelDown {
 		return true // horizontal wheel never scrolls a vertical pane
 	}
@@ -576,6 +643,14 @@ func (m *WorkspaceModel) wheelAtEdge(msg tea.MouseMsg) bool {
 }
 
 func (m *WorkspaceModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	if m.showHistory {
+		if m.historyDetail {
+			var cmd tea.Cmd
+			m.historyVP, cmd = m.historyVP.Update(msg)
+			return m, cmd
+		}
+		return m, nil
+	}
 	p, ok := m.paneAt(msg.X, msg.Y)
 	if !ok {
 		return m, nil
@@ -699,6 +774,9 @@ func (m *WorkspaceModel) View() (out string) {
 	if !m.ready {
 		return "loading workspace…"
 	}
+	if m.showHistory {
+		return m.historyView()
+	}
 	if m.showHelp {
 		return m.renderHelp()
 	}
@@ -817,6 +895,7 @@ func (m *WorkspaceModel) renderHelp() string {
 		{"R", "run on LeetCode (needs `lazyleet auth`)"},
 		{"s", "submit to LeetCode (needs `lazyleet auth`)"},
 		{"i", "import the last failing case as a local test"},
+		{"a", "recent local and remote attempt history"},
 		{"b", "back"}, {"?", "toggle this help"}, {"q", "back to browse"},
 	}
 	var b strings.Builder
