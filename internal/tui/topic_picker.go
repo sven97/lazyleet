@@ -68,7 +68,7 @@ func (m *BrowseModel) refreshTopicChoices() {
 }
 
 func (p *topicPicker) matches() []topicChoice {
-	q := strings.ReplaceAll(strings.ToLower(strings.TrimSpace(p.search.Value())), " ", "-")
+	q := strings.ToLower(strings.TrimSpace(p.search.Value()))
 	var out []topicChoice
 	for _, choice := range p.choices {
 		if strings.Contains(strings.ToLower(choice.tag), q) {
@@ -91,7 +91,6 @@ func (p *topicPicker) tags() []string {
 
 func (m *BrowseModel) handleTopicKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	p := m.topicPicker
-	matches := p.matches()
 	switch msg.String() {
 	case "esc":
 		m.topicPicker = nil
@@ -107,15 +106,18 @@ func (m *BrowseModel) handleTopicKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		p.cursor = max(0, p.cursor-1)
 		return m, nil
 	case "down", "ctrl+n":
+		matches := p.matches()
 		p.cursor = min(max(0, len(matches)-1), p.cursor+1)
 		return m, nil
 	case "pgup":
 		p.cursor = max(0, p.cursor-max(1, m.height-7))
 		return m, nil
 	case "pgdown":
+		matches := p.matches()
 		p.cursor = min(max(0, len(matches)-1), p.cursor+max(1, m.height-7))
 		return m, nil
 	case " ":
+		matches := p.matches()
 		if len(matches) > 0 {
 			tag := matches[p.cursor].tag
 			p.selected[tag] = !p.selected[tag]
