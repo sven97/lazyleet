@@ -175,7 +175,8 @@ A failed prefetch reports an error while keeping previously cached plans.
 
 In the workspace: `e` edit in `$EDITOR` · `r` run local tests · `R` run on
 LeetCode · `s` submit · `i` import the last failing case · `tab` switch pane ·
-`j`/`k` scroll · `z` zoom · `t` manage tests · `h` hints · `b`/`q` back to browse. Saving the solution file
+`j`/`k` scroll · `z` zoom · `t` manage tests · `h` hints · `a` attempt history ·
+`b`/`q` back to browse. Saving the solution file
 (from `$EDITOR` or any other editor) re-runs the local tests automatically.
 `R`/`s` need `lazyleet auth`. If prompted, run it in another terminal, then
 retry the key in your existing workspace. In an already-open browse screen,
@@ -220,6 +221,19 @@ problem resets them to hidden.
 Hints are stored with problem details and work offline, including from an
 expired cache when a refresh fails. Older caches may not contain hints; use
 `lazyleet solve <slug> --refresh` while online to fetch them.
+
+### Attempt history
+
+Press `a` in a workspace (outside the test-case manager, where `a` instead
+adds a case) to see its latest 50 local runs, LeetCode runs, and submissions,
+across languages. Use arrow keys or `j`/`k` to select an attempt, Enter for
+details, `r` to reload, and Esc to return. History includes verdicts, pass
+counts, runtime/memory when available, judge IDs, and diagnostic output.
+
+Attempts, including run-on-save and failed requests, are stored in the local
+SQLite database and remain available offline after restarting. A history-write
+failure is reported without replacing the judge result. Solution snapshots and auth
+credentials are not recorded; diagnostic output can include compiler excerpts.
 
 ### Local judge languages
 
