@@ -139,7 +139,12 @@ func finishAuth(cmd *cobra.Command, app *appContext, creds leetcode.Credentials,
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "authenticated as %s (%s)\n", user, source)
 	fmt.Fprintln(cmd.OutOrStdout(), "refreshing solve progress…")
-	ctx, cancel := context.WithTimeout(cmd.Context(), 90*time.Second)
+	// A first-time sign-in with an empty local cache chains a full paginated
+	// catalog fetch (tens of requests) plus two more paginated progress
+	// fetches, each bracketed by a session-liveness check, inside this one
+	// deadline — generous enough to survive a slow connection or large
+	// catalog without misreporting a slow warmup as a failure.
+	ctx, cancel := context.WithTimeout(cmd.Context(), 180*time.Second)
 	defer cancel()
 	client, err := app.newClient()
 	if err == nil {

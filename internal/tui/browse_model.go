@@ -89,6 +89,12 @@ type BrowseModel struct {
 	// rendered preview bodies keyed by slug|width|tab|hasImages (glamour is
 	// slow; keep re-visits and re-renders instant)
 	renderCache map[string]previewEntry
+	// previewRenderedKey/Body identify the content currently sitting in
+	// previewVP, so a refresh triggered by an unrelated background reload
+	// (auth/daily/etc.) doesn't yank the scroll position back to the top when
+	// the displayed content hasn't actually changed.
+	previewRenderedKey  string
+	previewRenderedBody string
 
 	imgProto   termimg.Protocol
 	imgDir     string
@@ -277,6 +283,13 @@ func (m *BrowseModel) progressCmd() tea.Cmd {
 	}
 }
 
+// rearmAutoSync clears the one-shot guard so maybeSyncProgress will fire
+// again — used whenever something makes the cached progress worth
+// re-checking (an auth-state flip, an explicit sync).
+func (m *BrowseModel) rearmAutoSync() {
+	m.autoSynced = false
+}
+
 // maybeSyncProgress kicks a one-shot background refresh of the signed-in user's
 // solve status (a few requests, not the whole catalog) so the ✓ marks and
 // per-plan counts reflect problems solved on the web. Runs once per session,
@@ -356,7 +369,7 @@ func (m *BrowseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case authLoadedMsg:
 		if m.auth.Authed != msg.a.Authed {
-			m.autoSynced = false
+			m.rearmAutoSync()
 		}
 		m.auth = msg.a
 		var cmds []tea.Cmd
@@ -455,6 +468,7 @@ func (m *BrowseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.key == m.previewKey() && !m.detailShowsStatus {
 			m.previewVP.SetContent(msg.content)
 			m.previewVP.GotoTop()
+			m.previewRenderedKey = msg.key
 			m.previewContentSlug = m.previewSlug
 			m.imgWritten = queueImagePrefix(m.imgWriter, msg.prefix, m.imgWritten)
 		}
@@ -654,7 +668,7 @@ func (m *BrowseModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case key.Matches(msg, m.keys.Sync):
 		if !m.syncing && !m.progressing {
-			m.autoSynced = false
+			m.rearmAutoSync()
 			m.syncing = true
 			m.statusMsg = "syncing…"
 			return m, tea.Batch(m.syncCmd(), m.spin.Tick)
@@ -1164,8 +1178,12 @@ func (m *BrowseModel) setFocus(reg Region) {
 // pane's expanded info when it is focused, otherwise the problem statement.
 func (m *BrowseModel) refreshDetail() tea.Cmd {
 	if m.detailShowsStatus {
-		m.previewVP.SetContent(m.statusDetailBody())
-		m.previewVP.GotoTop()
+		body := m.statusDetailBody()
+		if body != m.previewRenderedBody {
+			m.previewVP.SetContent(body)
+			m.previewVP.GotoTop()
+			m.previewRenderedBody = body
+		}
 		return nil
 	}
 	return m.refreshPreviewContent()
@@ -1208,8 +1226,11 @@ func (m *BrowseModel) refreshPreviewContent() tea.Cmd {
 	}
 	key := m.previewKey()
 	if e, ok := m.renderCache[key]; ok {
-		m.previewVP.SetContent(e.content)
-		m.previewVP.GotoTop()
+		if key != m.previewRenderedKey {
+			m.previewVP.SetContent(e.content)
+			m.previewVP.GotoTop()
+			m.previewRenderedKey = key
+		}
 		m.previewContentSlug = m.previewSlug
 		m.imgWritten = queueImagePrefix(m.imgWriter, e.prefix, m.imgWritten)
 		return nil

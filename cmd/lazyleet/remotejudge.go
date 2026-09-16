@@ -2,12 +2,21 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/sven97/lazyleet/internal/leetcode"
 	"github.com/sven97/lazyleet/internal/tui"
 )
+
+// sessionRecheckInterval bounds how often authenticatedClient re-verifies a
+// session against LeetCode. Run/Submit are pressed repeatedly within one
+// workspace session, and re-pinging WhoAmI before every single one of them
+// roughly doubled perceived latency for what is normally the common case (a
+// still-valid session).
+const sessionRecheckInterval = 60 * time.Second
 
 // remoteJudge implements tui.RemoteJudge over a LeetCode client. It is created
 // per workspace session.
@@ -16,6 +25,14 @@ type remoteJudge struct {
 	slug string
 	qid  int
 	lang string
+
+	// client/creds/verifiedAt cache the last-built, last-verified client so
+	// repeated Run/Submit calls reuse one rate limiter instead of resetting
+	// it on every keypress. They're rebuilt only when the on-disk credentials
+	// actually change, e.g. a sign-in from another terminal.
+	client     *leetcode.Client
+	creds      leetcode.Credentials
+	verifiedAt time.Time
 }
 
 func newRemoteJudge(app *appContext, q leetcode.Question, lang string) tui.RemoteJudge {
@@ -33,19 +50,35 @@ func (r *remoteJudge) Available() bool {
 }
 
 // Reload credentials for each attempt: signing in from another terminal must
-// take effect without discarding the open workspace.
+// take effect without discarding the open workspace. The client itself (and
+// its rate limiter) is reused across calls as long as credentials haven't
+// changed, and the session is only re-verified against LeetCode at most once
+// per sessionRecheckInterval rather than on every Run/Submit.
 func (r *remoteJudge) authenticatedClient(ctx context.Context) (*leetcode.Client, error) {
-	client, err := r.app.newClient()
+	creds, err := r.app.loadCredentials()
 	if err != nil {
 		return nil, err
 	}
-	if !client.Authenticated() {
+	if creds.Anonymous() {
 		return nil, fmt.Errorf("run `lazyleet auth` in another terminal, then retry R/s")
 	}
-	if err := requireSession(ctx, client); err != nil {
-		return nil, err
+	if r.client == nil || creds != r.creds {
+		client, err := r.app.newClient()
+		if err != nil {
+			return nil, err
+		}
+		r.client, r.creds, r.verifiedAt = client, creds, time.Time{}
 	}
-	return client, nil
+	if time.Since(r.verifiedAt) > sessionRecheckInterval {
+		if err := r.client.VerifySession(ctx); err != nil {
+			if errors.Is(err, leetcode.ErrSessionExpired) {
+				return nil, fmt.Errorf("run `lazyleet auth` in another terminal, then retry R/s")
+			}
+			return nil, err
+		}
+		r.verifiedAt = time.Now()
+	}
+	return r.client, nil
 }
 
 func (r *remoteJudge) Run(ctx context.Context, code, dataInput string) (tui.RemoteOutcome, error) {

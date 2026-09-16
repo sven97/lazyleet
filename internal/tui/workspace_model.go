@@ -85,7 +85,17 @@ type WorkspaceModel struct {
 	// returnToBrowse makes Back/Quit emit BackToBrowseMsg instead of tea.Quit
 	// so an owning AppModel can restore browse mode.
 	returnToBrowse bool
+
+	// progressChanged is set once an accepted submission has changed this
+	// problem's cached solve status, so the owning AppModel knows browse's
+	// problem list/daily streak actually need reloading on close instead of
+	// unconditionally refetching on every visit.
+	progressChanged bool
 }
+
+// ProgressChanged reports whether an accepted submission during this
+// workspace session changed the cached solve status.
+func (m *WorkspaceModel) ProgressChanged() bool { return m.progressChanged }
 
 type fileChangedMsg struct{}
 type runDebounceMsg struct{ gen int }
@@ -427,6 +437,9 @@ func (m *WorkspaceModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			o := msg.out
 			m.remoteOut = &o
 			m.statusMsg = m.remoteKind + ": " + o.Verdict
+			if m.remoteKind == "submit" && o.Accepted {
+				m.progressChanged = true
+			}
 		}
 		m.refreshResults()
 		return m, nil
