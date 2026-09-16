@@ -8,9 +8,14 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -28,10 +33,10 @@ jobs:
       - name: go vet
         run: go vet ./...
 
-      - name: staticcheck
-        run: |
-          go install honnef.co/go/tools/cmd/staticcheck@latest
-          staticcheck ./...
+      - uses: dominikh/staticcheck-action@v1
+        with:
+          version: "2026.2.1"
+          install-go: false
 
       - name: build
         run: go build ./...
@@ -41,6 +46,7 @@ jobs:
 
   release-dryrun:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
         with:
