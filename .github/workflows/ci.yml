@@ -8,12 +8,17 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
@@ -28,10 +33,10 @@ jobs:
       - name: go vet
         run: go vet ./...
 
-      - name: staticcheck
-        run: |
-          go install honnef.co/go/tools/cmd/staticcheck@latest
-          staticcheck ./...
+      - uses: dominikh/staticcheck-action@v1
+        with:
+          version: "2026.2.1"
+          install-go: false
 
       - name: build
         run: go build ./...
@@ -41,11 +46,12 @@ jobs:
 
   release-dryrun:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
@@ -53,7 +59,7 @@ jobs:
       # `brews` deprecation notice even though `brews` still works fine
       # (see .goreleaser.yaml). `build --snapshot` below still validates the
       # config end-to-end.
-      - uses: goreleaser/goreleaser-action@v6
+      - uses: goreleaser/goreleaser-action@v7
         with:
           version: "~> v2"
           args: build --snapshot --clean --single-target

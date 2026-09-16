@@ -23,7 +23,6 @@ type BrowseKeyMap struct {
 	ClearListFilter key.Binding
 	Sync            key.Binding
 	Zoom            key.Binding
-	PreviewTab      key.Binding
 	Help            key.Binding
 	Quit            key.Binding
 }
@@ -49,7 +48,6 @@ func DefaultBrowseKeyMap() BrowseKeyMap {
 		ClearListFilter: key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "clear filters/sort")),
 		Sync:            key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "sync")),
 		Zoom:            key.NewBinding(key.WithKeys("z", "+"), key.WithHelp("z", "zoom")),
-		PreviewTab:      key.NewBinding(key.WithKeys("]", "["), key.WithHelp("]", "preview tab")),
 		Help:            key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
 		Quit:            key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
 	}

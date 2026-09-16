@@ -87,8 +87,7 @@ type BrowseModel struct {
 	previewImages      *statementImages
 	previewCancel      context.CancelFunc // cancels the in-flight statement/image load
 	previewContentSlug string             // slug whose statement is currently in the viewport
-	previewTab         int                // 0 = statement, 1 = topics
-	// rendered preview bodies keyed by slug|width|tab|hasImages (glamour is
+	// rendered preview bodies keyed by slug|width|hasImages (glamour is
 	// slow; keep re-visits and re-renders instant)
 	renderCache map[string]previewEntry
 	// previewRenderedKey/Body identify the content currently sitting in
@@ -113,6 +112,7 @@ type BrowseModel struct {
 	syncing      bool
 	autoSynced   bool // guards the one-shot progress sync on browse open
 	progressing  bool // a background SyncProgress is in flight
+	awaitSignIn  bool // auth just flipped to true; confirm once loadUser resolves
 	statusMsg    string
 	loadErr      error
 	lastSync     time.Time // full problem catalog
@@ -376,6 +376,7 @@ func (m *BrowseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case authLoadedMsg:
 		if m.auth.Authed != msg.a.Authed {
 			m.rearmAutoSync()
+			m.awaitSignIn = msg.a.Authed // false->true edge only
 		}
 		m.auth = msg.a
 		var cmds []tea.Cmd
@@ -386,6 +387,8 @@ func (m *BrowseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case userLoadedMsg:
+		awaitSignIn := m.awaitSignIn
+		m.awaitSignIn = false
 		if msg.err != nil {
 			m.statusMsg = "could not verify session: " + msg.err.Error()
 		} else if msg.name == "" && m.auth.Authed {
@@ -394,6 +397,13 @@ func (m *BrowseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.statusMsg = "session expired — run `lazyleet auth`, then press s"
 		} else {
 			m.auth.User = msg.name
+			// The Status pane already shows "✓ <user>" persistently once
+			// authed — only echo it here (single-pane/zoomed layout, same
+			// condition the footer's sync-age fallback uses) where that pane
+			// isn't actually on screen to notice for you.
+			if awaitSignIn && m.layout.Single && m.focus != RegionStatus {
+				m.statusMsg = "signed in as " + msg.name
+			}
 		}
 		return m, m.refreshDetail()
 
@@ -684,7 +694,6 @@ func (m *BrowseModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if !m.syncing && !m.progressing {
 			m.rearmAutoSync()
 			m.syncing = true
-			m.statusMsg = "syncing…"
 			return m, tea.Batch(m.syncCmd(), m.spin.Tick)
 		}
 		return m, nil
@@ -707,13 +716,6 @@ func (m *BrowseModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.filter.Focus()
 			return m, nil
 		}
-	case key.Matches(msg, m.keys.PreviewTab):
-		if m.detailShowsStatus {
-			return m, nil
-		}
-		m.previewTab = (m.previewTab + 1) % 2
-		return m, m.refreshDetail()
-
 	case key.Matches(msg, m.keys.FilterTags):
 		return m.openTopicPicker()
 	case key.Matches(msg, m.keys.FilterDiff):
@@ -721,7 +723,7 @@ func (m *BrowseModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.afterListChange()
 	case key.Matches(msg, m.keys.FilterStatus):
 		if !m.auth.Authed {
-			m.statusMsg = "for your solve progress, run `lazyleet auth` in another terminal, then press s"
+			m.statusMsg = "sign in (`lazyleet auth`), then press s to sync progress"
 		}
 		m.fltStatus = cycleStatus(m.fltStatus)
 		return m.afterListChange()
@@ -1227,18 +1229,16 @@ type previewRenderedMsg struct {
 
 func (m *BrowseModel) previewKey() string {
 	hasImg := m.previewImages != nil && len(m.previewImages.byURL) > 0
-	return fmt.Sprintf("%s|%d|%d|%t", m.previewSlug, m.previewVP.Width, m.previewTab, hasImg)
+	return fmt.Sprintf("%s|%d|%t", m.previewSlug, m.previewVP.Width, hasImg)
 }
 
-// refreshPreviewContent updates the preview pane. The topics tab is cheap and
-// rendered inline; the statement tab is glamour-rendered off the UI goroutine
-// (and cached), so navigating never blocks on it.
+// refreshPreviewContent updates the preview pane with the header (difficulty
+// / AC% / tags, via renderProblemHeader — shared with the workspace Statement
+// pane) followed by the glamour-rendered statement. The header is cheap and
+// built inline; the statement is rendered off the UI goroutine (and cached),
+// so navigating never blocks on it.
 func (m *BrowseModel) refreshPreviewContent() tea.Cmd {
 	if m.previewVP.Width < 1 {
-		return nil
-	}
-	if m.previewTab == 1 {
-		m.previewVP.SetContent(m.topicsBody())
 		return nil
 	}
 	key := m.previewKey()
@@ -1255,9 +1255,14 @@ func (m *BrowseModel) refreshPreviewContent() tea.Cmd {
 	// render asynchronously
 	md, width := m.previewMD, m.previewVP.Width
 	imgs := m.previewImages
+	header := ""
+	if r, ok := m.currentRow(); ok {
+		header = renderProblemHeader(m.th, r.Meta(), width)
+	}
 	return func() tea.Msg {
 		body, prefix := renderStatementMD(newStatementRenderer(width), md, width, imgs)
-		return previewRenderedMsg{key: key, content: strings.TrimRight(body, "\n"), prefix: prefix}
+		content := header + body
+		return previewRenderedMsg{key: key, content: strings.TrimRight(content, "\n"), prefix: prefix}
 	}
 }
 
@@ -1291,28 +1296,6 @@ func (m *BrowseModel) loadPreviewImagesCmd(slug, md string) tea.Cmd {
 		}
 		return previewImagesMsg{slug: slug, byURL: out}
 	}
-}
-
-func (m *BrowseModel) topicsBody() string {
-	r, ok := m.currentRow()
-	if !ok {
-		return ""
-	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "%s\n\n", m.th.Title.Render(r.Title))
-	fmt.Fprintf(&b, "difficulty  %s\n", DifficultyStyle(r.Difficulty).Render(r.Difficulty))
-	fmt.Fprintf(&b, "acceptance  %.1f%%\n", r.ACRate)
-	if r.PaidOnly {
-		b.WriteString(m.th.ErrorText.Render("paid-only\n"))
-	}
-	b.WriteString("\ntopics\n")
-	if len(r.Tags) == 0 {
-		b.WriteString(m.th.Muted.Render("  (run sync for topic tags)\n"))
-	}
-	for _, t := range r.Tags {
-		fmt.Fprintf(&b, "  · %s\n", t)
-	}
-	return b.String()
 }
 
 var _ tea.Model = (*BrowseModel)(nil)

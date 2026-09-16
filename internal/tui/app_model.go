@@ -31,8 +31,6 @@ type AppModel struct {
 	imgProto  termimg.Protocol
 	imgDir    string
 	imgWriter *ImageWriter
-
-	statusErr string // factory / open failure, shown via browse status
 }
 
 // NewAppModel wraps browse with a factory used when the user opens a problem.
@@ -133,7 +131,6 @@ func (m *AppModel) openWorkspace(slug string) (tea.Model, tea.Cmd) {
 		m.browse.statusMsg = "cannot open workspace: no factory configured"
 		return m, nil
 	}
-	m.statusErr = ""
 	m.browse.statusMsg = "opening problem…"
 	factory := m.factory
 	return m, func() tea.Msg {
@@ -144,8 +141,7 @@ func (m *AppModel) openWorkspace(slug string) (tea.Model, tea.Cmd) {
 
 func (m *AppModel) handleWorkspaceOpened(msg workspaceOpenedMsg) (tea.Model, tea.Cmd) {
 	if msg.err != nil {
-		m.browse.statusMsg = fmt.Sprintf("workspace: %v", msg.err)
-		m.statusErr = msg.err.Error()
+		m.browse.statusMsg = fmt.Sprintf("could not open problem: %v", msg.err)
 		return m, nil
 	}
 	ws := msg.ws
@@ -159,7 +155,6 @@ func (m *AppModel) handleWorkspaceOpened(msg workspaceOpenedMsg) (tea.Model, tea
 	m.workspace = ws
 	m.browse.Chosen = ""
 	m.browse.statusMsg = ""
-	m.statusErr = ""
 	return m, ws.Init()
 }
 

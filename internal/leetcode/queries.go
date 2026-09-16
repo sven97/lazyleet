@@ -33,6 +33,7 @@ query questionData($titleSlug: String!) {
     title
     slug: titleSlug
     difficulty
+    acRate
     paidOnly: isPaidOnly
     status
     content

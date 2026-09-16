@@ -413,11 +413,8 @@ func (m *BrowseModel) detailTitle() string {
 	if m.detailShowsStatus {
 		return "Status detail"
 	}
-	if m.previewTab == 1 {
-		return "Topics"
-	}
 	if r, ok := m.currentRow(); ok {
-		return fmt.Sprintf("%d. %s", r.FrontendID, r.Title)
+		return problemTitle(r.FrontendID, r.Title, r.PaidOnly)
 	}
 	return "Detail"
 }
@@ -425,9 +422,6 @@ func (m *BrowseModel) detailTitle() string {
 func (m *BrowseModel) detailBody() string {
 	if m.detailShowsStatus {
 		return m.previewVP.View() // holds statusDetailBody, set by refreshDetail
-	}
-	if m.previewTab == 1 {
-		return m.previewVP.View() // topics — derived from the row, always current
 	}
 	// The viewport still holds the previously shown statement until the new
 	// one is fetched and rendered; don't show stale content for the wrong row.
@@ -447,34 +441,42 @@ func (m *BrowseModel) renderStatusBar() string {
 		return ""
 	}
 	w := m.width
-	left := ""
+	msg := ""
 	if m.syncing {
-		left = m.th.Spinner.Render(m.spin.View()) + " syncing "
+		msg = m.th.Spinner.Render(m.spin.View()) + " syncing"
 	} else if m.progressing {
-		left = m.th.Spinner.Render(m.spin.View()) + " syncing progress "
+		msg = m.th.Spinner.Render(m.spin.View()) + " syncing progress"
 	} else if m.statusMsg != "" {
-		left = m.statusMsg + "  "
+		msg = m.statusMsg
+	}
+	// The Status pane already shows this, with a staleness nudge — only
+	// repeat it here when that pane isn't actually on screen (single-pane
+	// layout, i.e. a narrow terminal or another pane zoomed).
+	age := ""
+	if !m.lastSync.IsZero() && m.layout.Single && m.focus != RegionStatus {
+		d := time.Since(m.lastSync)
+		style := m.th.Muted
+		if d > staleSyncAfter {
+			style = m.th.ErrorText
+		}
+		age = style.Render(fmt.Sprintf("synced %s ago", roughAge(d)))
+	}
+	status := msg
+	if age != "" {
+		if status != "" {
+			status += "  "
+		}
+		status += age
 	}
 
 	var segs []string
 	for _, h := range m.keys.shortcutHints(m.filtering) {
 		segs = append(segs, m.th.StatusKey.Render(h.key)+m.th.StatusBar.Render(" "+h.desc))
 	}
-	// The Status pane already shows this, with a staleness nudge — only repeat
-	// it here when that pane isn't actually on screen (single-pane layout,
-	// i.e. a narrow terminal or another pane zoomed).
-	right := ""
-	if !m.lastSync.IsZero() && m.layout.Single && m.focus != RegionStatus {
-		age := time.Since(m.lastSync)
-		style := m.th.Muted
-		if age > staleSyncAfter {
-			style = m.th.ErrorText
-		}
-		right = style.Render(fmt.Sprintf("  synced %s ago", roughAge(age)))
-	}
+	hints := strings.Join(segs, m.th.StatusDivider.Render(" │ "))
 
-	line := left + strings.Join(segs, m.th.StatusDivider.Render(" │ ")) + right
-	return m.th.StatusBar.Width(w).Render(truncate(line, w))
+	line := renderSplitStatusLine(hints, status, w)
+	return m.th.StatusBar.Width(w).Render(line)
 }
 
 func (m *BrowseModel) renderHelp() string {
@@ -488,7 +490,6 @@ func (m *BrowseModel) renderHelp() string {
 		{"p", "toggle hide paid-only"},
 		{"S", "cycle sort (# → AC%↑ → AC%↓ → difficulty)"},
 		{"c", "clear all filters + sort"},
-		{"]", "toggle preview tab (statement / topics)"},
 		{"s", "sync problem cache from LeetCode"},
 		{"t", "filter by topic tags (match all selected)"},
 		{"z", "zoom the focused pane"}, {"?", "toggle this help"}, {"q", "quit"},
