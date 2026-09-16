@@ -18,6 +18,7 @@ type BrowseKeyMap struct {
 	FilterDiff      key.Binding
 	FilterStatus    key.Binding
 	FilterPaid      key.Binding
+	FilterTags      key.Binding
 	Sort            key.Binding
 	ClearListFilter key.Binding
 	Sync            key.Binding
@@ -42,6 +43,7 @@ func DefaultBrowseKeyMap() BrowseKeyMap {
 		ClearFilt:       key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "clear fuzzy filter")),
 		FilterDiff:      key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "difficulty filter")),
 		FilterStatus:    key.NewBinding(key.WithKeys("f"), key.WithHelp("f", "status filter")),
+		FilterTags:      key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "topics")),
 		FilterPaid:      key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "toggle paid-only")),
 		Sort:            key.NewBinding(key.WithKeys("S"), key.WithHelp("S", "cycle sort")),
 		ClearListFilter: key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "clear filters/sort")),
@@ -63,6 +65,7 @@ func (k BrowseKeyMap) shortcutHints(filtering bool) []hint {
 		{k.Open.Help().Key, k.Open.Help().Desc},
 		{k.Filter.Help().Key, k.Filter.Help().Desc},
 		{"d/f/p", "filter"},
+		{k.FilterTags.Help().Key, k.FilterTags.Help().Desc},
 		{k.Sort.Help().Key, k.Sort.Help().Desc},
 		{k.NextPane.Help().Key, k.NextPane.Help().Desc},
 		{k.Sync.Help().Key, k.Sync.Help().Desc},

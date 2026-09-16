@@ -179,6 +179,18 @@ If the post-login refresh fails, credentials remain saved; retry with
 `lazyleet sync --progress`. The workspace lives at
 `$XDG_DATA_HOME/lazyleet/workspace/<id>-<slug>/`.
 
+### Filtering by topic
+
+In browse mode, press `t` to open the topic picker. Type to search, use the
+arrow keys to move, Space to select or deselect, and Enter to apply. Multiple
+selected topics require a problem to match **all** of them. Esc cancels your
+changes; Ctrl+R clears the draft selection. Topic counts refer to the cached
+catalog, and the picker works offline.
+
+Topics combine with difficulty, solve status, paid-only, and fuzzy title
+filters, including inside study plans and the daily challenge. Press `c` in
+browse to clear topic and other structured filters.
+
 ### Local judge languages
 
 | Language | Local `r` | Notes |
