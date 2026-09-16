@@ -35,23 +35,30 @@ func resolvePlan(ctx context.Context, db *store.Store, slug string, ttl time.Dur
 		p, err := planFromCache(ctx, db, store.StudyPlan{Slug: b.Slug, Name: b.Name, Source: "bundled", Problems: b.Problems})
 		return resolvedPlan{plan: p}, err
 	}
-	cached, cacheErr := db.GetStudyPlan(ctx, slug)
-	if cacheErr != nil && !errors.Is(cacheErr, store.ErrNotCached) {
-		return resolvedPlan{}, cacheErr
-	}
-	usable := cacheErr == nil && len(cached.Problems) > 0
-	if usable && !force && (ttl <= 0 || time.Since(cached.FetchedAt) < ttl) {
-		p, err := planFromCache(ctx, db, cached)
-		return resolvedPlan{plan: p}, err
+	if !force {
+		cached, err := db.GetStudyPlan(ctx, slug, ttl)
+		if err != nil && !errors.Is(err, store.ErrNotCached) {
+			return resolvedPlan{}, err
+		}
+		if err == nil && len(cached.Problems) > 0 {
+			p, err := planFromCache(ctx, db, cached)
+			return resolvedPlan{plan: p}, err
+		}
 	}
 	p, err := fetch(ctx, slug)
 	if err == nil && (p.Slug != slug || len(p.Questions) == 0) {
 		err = fmt.Errorf("empty or mismatched study plan %q", slug)
 	}
 	if err != nil {
-		if usable {
-			old, cacheErr := planFromCache(ctx, db, cached)
-			return resolvedPlan{plan: old, refreshErr: err}, cacheErr
+		// ttl=0 disables the staleness check, so this recovers any cached
+		// copy regardless of age for a usable offline fallback.
+		old, cacheErr := db.GetStudyPlan(ctx, slug, 0)
+		if cacheErr != nil && !errors.Is(cacheErr, store.ErrNotCached) {
+			return resolvedPlan{}, cacheErr
+		}
+		if cacheErr == nil && len(old.Problems) > 0 {
+			oldPlan, convErr := planFromCache(ctx, db, old)
+			return resolvedPlan{plan: oldPlan, refreshErr: err}, convErr
 		}
 		return resolvedPlan{}, err
 	}

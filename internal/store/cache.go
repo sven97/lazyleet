@@ -39,8 +39,10 @@ ON CONFLICT(slug) DO UPDATE SET
 	return err
 }
 
-// GetStudyPlan returns a cached plan, or ErrNotCached.
-func (s *Store) GetStudyPlan(ctx context.Context, slug string) (StudyPlan, error) {
+// GetStudyPlan returns a cached plan younger than ttl, or ErrNotCached
+// (also when the row exists but is stale). ttl<=0 disables the staleness
+// check, mirroring GetProblemDetail's ttl semantics.
+func (s *Store) GetStudyPlan(ctx context.Context, slug string, ttl time.Duration) (StudyPlan, error) {
 	var (
 		p         StudyPlan
 		probJSON  string
@@ -56,6 +58,9 @@ func (s *Store) GetStudyPlan(ctx context.Context, slug string) (StudyPlan, error
 		return StudyPlan{}, err
 	}
 	p.FetchedAt = time.Unix(fetchedAt, 0)
+	if ttl > 0 && time.Since(p.FetchedAt) >= ttl {
+		return StudyPlan{}, ErrNotCached
+	}
 	if err := json.Unmarshal([]byte(probJSON), &p.Problems); err != nil {
 		return StudyPlan{}, err
 	}

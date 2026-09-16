@@ -61,7 +61,7 @@ func TestPlanCacheLifecycle(t *testing.T) {
 	if err != nil || result.refreshErr == nil || result.plan.Questions[0].Group != "Arrays" {
 		t.Fatalf("offline fallback: %+v %v", result, err)
 	}
-	cached, err := db.GetStudyPlan(ctx, "leetcode-75")
+	cached, err := db.GetStudyPlan(ctx, "leetcode-75", 0)
 	if err != nil || cached.FetchedAt.Unix() != 0 {
 		t.Fatalf("failed refresh changed timestamp: %+v %v", cached, err)
 	}
@@ -159,7 +159,7 @@ func TestPrefetchAttemptsEveryPlanAndReportsStaleFallback(t *testing.T) {
 		t.Fatalf("partial failure: calls=%d err=%v", calls, err)
 	}
 	for _, ref := range officialPlans {
-		if _, err := db.GetStudyPlan(ctx, ref.slug); err != nil {
+		if _, err := db.GetStudyPlan(ctx, ref.slug, 0); err != nil {
 			t.Fatal(err)
 		}
 	}

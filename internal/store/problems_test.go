@@ -116,19 +116,25 @@ func TestStudyPlanRoundTrip(t *testing.T) {
 	defer s.Close()
 	ctx := context.Background()
 
-	if _, err := s.GetStudyPlan(ctx, "nope"); err != ErrNotCached {
+	if _, err := s.GetStudyPlan(ctx, "nope", 0); err != ErrNotCached {
 		t.Fatalf("want ErrNotCached, got %v", err)
 	}
 	in := StudyPlan{Slug: "blind-75", Name: "Blind 75", Source: "bundled", Problems: []string{"two-sum", "valid-parentheses"}}
 	if err := s.PutStudyPlan(ctx, in); err != nil {
 		t.Fatal(err)
 	}
-	got, err := s.GetStudyPlan(ctx, "blind-75")
+	got, err := s.GetStudyPlan(ctx, "blind-75", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got.Name != "Blind 75" || len(got.Problems) != 2 || got.Problems[1] != "valid-parentheses" {
 		t.Fatalf("plan = %+v", got)
+	}
+	if _, err := s.GetStudyPlan(ctx, "blind-75", time.Hour); err != nil {
+		t.Fatalf("plan within ttl should be fresh: %v", err)
+	}
+	if _, err := s.GetStudyPlan(ctx, "blind-75", time.Nanosecond); err != ErrNotCached {
+		t.Fatalf("stale plan should be ErrNotCached, got %v", err)
 	}
 }
 
