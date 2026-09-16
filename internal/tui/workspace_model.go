@@ -92,6 +92,12 @@ type WorkspaceModel struct {
 	historyErr        error
 	historyVP         viewport.Model
 
+	// pendingRunNote overrides the generic "local: N/M passed" status-bar
+	// summary the next time a run finishes — used by an auto-triggered run
+	// (e.g. after importing a failing case) whose own confirmation message
+	// is more specific and should win instead of being clobbered.
+	pendingRunNote string
+
 	// returnToBrowse makes Back/Quit emit BackToBrowseMsg instead of tea.Quit
 	// so an owning AppModel can restore browse mode.
 	returnToBrowse bool
@@ -402,12 +408,17 @@ func (m *WorkspaceModel) importFailingCase() (tea.Model, tea.Cmd) {
 	if added == 0 {
 		msg = "already have this case in testcases.jsonl"
 	}
-	// startRun() clears statusMsg as part of kicking off a normal run, so set
-	// ours after — it survives (runFinishedMsg doesn't touch statusMsg) and
-	// shows once the run's own "running…" spinner clears, instead of the
-	// confirmation being wiped before it's ever seen.
+	// startRun() clears statusMsg as part of kicking off a normal run, and the
+	// run's own completion normally overwrites it with a pass/fail summary —
+	// pendingRunNote overrides that once so this confirmation is what's left
+	// once the run settles, instead of being clobbered either way. Only defer
+	// it if a run actually started (m.runner == nil leaves m.running false
+	// and no runFinishedMsg will ever arrive to consume it).
 	model, cmd := m.startRun()
 	m.statusMsg = msg
+	if m.running {
+		m.pendingRunNote = msg
+	}
 	return model, cmd
 }
 
@@ -449,6 +460,17 @@ func (m *WorkspaceModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err == nil {
 			r := msg.res
 			m.lastRun = &r
+		}
+		switch {
+		case m.pendingRunNote != "":
+			m.statusMsg, m.pendingRunNote = m.pendingRunNote, ""
+		case msg.err != nil:
+			m.statusMsg = "local run failed: " + msg.err.Error()
+		default:
+			// Mirrors the "run: <verdict>" / "submit: <verdict>" echo remote
+			// run/submit already leave in the status bar, so a local run is
+			// just as visible at a glance if you're not looking at Results.
+			m.statusMsg = localRunSummary(*m.lastRun)
 		}
 		m.statusMsg = withHistoryErr(m.statusMsg, msg.historyErr)
 		m.refreshResults()
@@ -564,7 +586,7 @@ func (m *WorkspaceModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.historyDetail = false
 		return m, m.loadHistory()
 	case key.Matches(msg, m.keys.Tests):
-		m.statusMsg = "test-case manager lands in Phase 4 — edit testcases.jsonl for now"
+		m.statusMsg = "test-case manager isn't built yet — edit testcases.jsonl directly for now"
 		return m, nil
 	case key.Matches(msg, m.keys.Up):
 		m.focusedViewport().ScrollUp(2)
@@ -734,8 +756,14 @@ func (m *WorkspaceModel) refreshStatement() {
 			m.stmtWidth = w
 		}
 	}
+	header := renderProblemHeader(m.th, ProblemMeta{
+		Difficulty: m.q.Difficulty,
+		ACRate:     m.q.ACRate,
+		PaidOnly:   m.q.PaidOnly,
+		Tags:       m.q.Tags,
+	}, w)
 	body, prefix := renderStatementMD(m.stmtRenderer, m.q.Statement, w, m.stmtImages)
-	m.statement.SetContent(strings.TrimRight(body, "\n"))
+	m.statement.SetContent(strings.TrimRight(header+body, "\n"))
 	m.imgWritten = queueImagePrefix(m.imgWriter, prefix, m.imgWritten)
 }
 
@@ -850,8 +878,7 @@ func (m *WorkspaceModel) paneTitle(p Pane, focused bool) string {
 
 	switch p {
 	case PaneStatement:
-		return ts.Render(fmt.Sprintf("%s  ", m.q.Title)) +
-			DifficultyStyle(m.q.Difficulty).Render(m.q.Difficulty)
+		return ts.Render(problemTitle(m.q.FrontendID, m.q.Title, m.q.PaidOnly))
 	case PaneCode:
 		title := ts.Render(fmt.Sprintf("solution.%s", extOf(m.ws.SolutionPath)))
 		if m.codeChangedSinceRun() {
@@ -870,11 +897,11 @@ func (m *WorkspaceModel) renderStatusBar() string {
 	}
 	w := m.width
 
-	left := ""
+	status := ""
 	if m.running {
-		left = m.th.Spinner.Render(m.spin.View()) + " running "
+		status = m.th.Spinner.Render(m.spin.View()) + " running"
 	} else if m.statusMsg != "" {
-		left = m.statusMsg + "  "
+		status = m.statusMsg
 	}
 
 	var segs []string
@@ -883,10 +910,7 @@ func (m *WorkspaceModel) renderStatusBar() string {
 	}
 	hints := strings.Join(segs, m.th.StatusDivider.Render(" │ "))
 
-	line := left + hints
-	if lipgloss.Width(line) > w {
-		line = truncate(line, w)
-	}
+	line := renderSplitStatusLine(hints, status, w)
 	return m.th.StatusBar.Width(w).Render(line)
 }
 
