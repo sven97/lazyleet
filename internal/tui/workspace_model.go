@@ -650,8 +650,14 @@ func (m *WorkspaceModel) refreshStatement() {
 			m.stmtWidth = w
 		}
 	}
+	header := renderProblemHeader(m.th, ProblemMeta{
+		Difficulty: m.q.Difficulty,
+		ACRate:     m.q.ACRate,
+		PaidOnly:   m.q.PaidOnly,
+		Tags:       m.q.Tags,
+	}, w)
 	body, prefix := renderStatementMD(m.stmtRenderer, m.q.Statement, w, m.stmtImages)
-	m.statement.SetContent(strings.TrimRight(body, "\n"))
+	m.statement.SetContent(strings.TrimRight(header+body, "\n"))
 	m.imgWritten = queueImagePrefix(m.imgWriter, prefix, m.imgWritten)
 }
 
@@ -763,8 +769,7 @@ func (m *WorkspaceModel) paneTitle(p Pane, focused bool) string {
 
 	switch p {
 	case PaneStatement:
-		return ts.Render(fmt.Sprintf("%s  ", m.q.Title)) +
-			DifficultyStyle(m.q.Difficulty).Render(m.q.Difficulty)
+		return ts.Render(problemTitle(m.q.FrontendID, m.q.Title, m.q.PaidOnly))
 	case PaneCode:
 		title := ts.Render(fmt.Sprintf("solution.%s", extOf(m.ws.SolutionPath)))
 		if m.codeChangedSinceRun() {

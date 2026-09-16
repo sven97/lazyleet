@@ -10,6 +10,7 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/sven97/lazyleet/internal/leetcode"
 	"github.com/sven97/lazyleet/internal/termimg"
 )
 
@@ -87,5 +88,55 @@ func TestRenderStatementInlinesKnownImage(t *testing.T) {
 	}
 	if !strings.Contains(out, "before") || !strings.Contains(out, "after") {
 		t.Errorf("surrounding text dropped:\n%s", out)
+	}
+}
+
+func TestProblemTitle(t *testing.T) {
+	if got, want := problemTitle(1, "Two Sum", false), "1. Two Sum"; got != want {
+		t.Errorf("problemTitle() = %q, want %q", got, want)
+	}
+	if got := problemTitle(1, "Two Sum", true); !strings.Contains(got, "🔒") || !strings.Contains(got, "1. Two Sum") {
+		t.Errorf("problemTitle() paid-only = %q, want lock glyph + id/title", got)
+	}
+}
+
+func TestHumanizeTag(t *testing.T) {
+	cases := map[string]string{
+		"array":               "Array",
+		"dynamic-programming": "Dynamic Programming",
+		"Array":               "Array",
+	}
+	for in, want := range cases {
+		if got := humanizeTag(in); got != want {
+			t.Errorf("humanizeTag(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// TestRenderProblemHeaderShared locks in that browse (via BrowseRow.Meta) and
+// the workspace (via leetcode.Question's fields) feed renderProblemHeader the
+// same shape of metadata and get identical output for identical values — the
+// two panes must never drift apart in structure or content.
+func TestRenderProblemHeaderShared(t *testing.T) {
+	th := DefaultTheme()
+	row := BrowseRow{Difficulty: "Medium", ACRate: 53.3, PaidOnly: true, Tags: []string{"array", "math"}}
+	q := leetcode.Question{Difficulty: "Medium", ACRate: 53.3, PaidOnly: true, Tags: []string{"array", "math"}}
+
+	fromBrowse := renderProblemHeader(th, row.Meta(), 60)
+	fromWorkspace := renderProblemHeader(th, ProblemMeta{
+		Difficulty: q.Difficulty, ACRate: q.ACRate, PaidOnly: q.PaidOnly, Tags: q.Tags,
+	}, 60)
+
+	if fromBrowse != fromWorkspace {
+		t.Errorf("browse and workspace headers diverged:\nbrowse:    %q\nworkspace: %q", fromBrowse, fromWorkspace)
+	}
+	if !strings.Contains(ansi.Strip(fromBrowse), "Medium") || !strings.Contains(ansi.Strip(fromBrowse), "AC 53.3%") {
+		t.Errorf("header missing difficulty/AC%%: %q", ansi.Strip(fromBrowse))
+	}
+	if !strings.Contains(ansi.Strip(fromBrowse), "Array · Math") {
+		t.Errorf("header missing humanized tags: %q", ansi.Strip(fromBrowse))
+	}
+	if !strings.Contains(ansi.Strip(fromBrowse), "paid-only") {
+		t.Errorf("header missing paid-only marker: %q", ansi.Strip(fromBrowse))
 	}
 }

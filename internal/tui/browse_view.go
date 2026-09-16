@@ -410,11 +410,8 @@ func (m *BrowseModel) detailTitle() string {
 	if m.detailShowsStatus {
 		return "Status detail"
 	}
-	if m.previewTab == 1 {
-		return "Topics"
-	}
 	if r, ok := m.currentRow(); ok {
-		return fmt.Sprintf("%d. %s", r.FrontendID, r.Title)
+		return problemTitle(r.FrontendID, r.Title, r.PaidOnly)
 	}
 	return "Detail"
 }
@@ -422,9 +419,6 @@ func (m *BrowseModel) detailTitle() string {
 func (m *BrowseModel) detailBody() string {
 	if m.detailShowsStatus {
 		return m.previewVP.View() // holds statusDetailBody, set by refreshDetail
-	}
-	if m.previewTab == 1 {
-		return m.previewVP.View() // topics — derived from the row, always current
 	}
 	// The viewport still holds the previously shown statement until the new
 	// one is fetched and rendered; don't show stale content for the wrong row.
@@ -485,7 +479,6 @@ func (m *BrowseModel) renderHelp() string {
 		{"p", "toggle hide paid-only"},
 		{"S", "cycle sort (# → AC%↑ → AC%↓ → difficulty)"},
 		{"c", "clear all filters + sort"},
-		{"]", "toggle preview tab (statement / topics)"},
 		{"s", "sync problem cache from LeetCode"},
 		{"z", "zoom the focused pane"}, {"?", "toggle this help"}, {"q", "quit"},
 	}
