@@ -438,34 +438,42 @@ func (m *BrowseModel) renderStatusBar() string {
 		return ""
 	}
 	w := m.width
-	left := ""
+	msg := ""
 	if m.syncing {
-		left = m.th.Spinner.Render(m.spin.View()) + " syncing "
+		msg = m.th.Spinner.Render(m.spin.View()) + " syncing"
 	} else if m.progressing {
-		left = m.th.Spinner.Render(m.spin.View()) + " syncing progress "
+		msg = m.th.Spinner.Render(m.spin.View()) + " syncing progress"
 	} else if m.statusMsg != "" {
-		left = m.statusMsg + "  "
+		msg = m.statusMsg
+	}
+	// The Status pane already shows this, with a staleness nudge — only
+	// repeat it here when that pane isn't actually on screen (single-pane
+	// layout, i.e. a narrow terminal or another pane zoomed).
+	age := ""
+	if !m.lastSync.IsZero() && m.layout.Single && m.focus != RegionStatus {
+		d := time.Since(m.lastSync)
+		style := m.th.Muted
+		if d > staleSyncAfter {
+			style = m.th.ErrorText
+		}
+		age = style.Render(fmt.Sprintf("synced %s ago", roughAge(d)))
+	}
+	status := msg
+	if age != "" {
+		if status != "" {
+			status += "  "
+		}
+		status += age
 	}
 
 	var segs []string
 	for _, h := range m.keys.shortcutHints(m.filtering) {
 		segs = append(segs, m.th.StatusKey.Render(h.key)+m.th.StatusBar.Render(" "+h.desc))
 	}
-	// The Status pane already shows this, with a staleness nudge — only repeat
-	// it here when that pane isn't actually on screen (single-pane layout,
-	// i.e. a narrow terminal or another pane zoomed).
-	right := ""
-	if !m.lastSync.IsZero() && m.layout.Single && m.focus != RegionStatus {
-		age := time.Since(m.lastSync)
-		style := m.th.Muted
-		if age > staleSyncAfter {
-			style = m.th.ErrorText
-		}
-		right = style.Render(fmt.Sprintf("  synced %s ago", roughAge(age)))
-	}
+	hints := strings.Join(segs, m.th.StatusDivider.Render(" │ "))
 
-	line := left + strings.Join(segs, m.th.StatusDivider.Render(" │ ")) + right
-	return m.th.StatusBar.Width(w).Render(truncate(line, w))
+	line := renderSplitStatusLine(hints, status, w)
+	return m.th.StatusBar.Width(w).Render(line)
 }
 
 func (m *BrowseModel) renderHelp() string {

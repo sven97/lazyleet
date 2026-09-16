@@ -61,6 +61,18 @@ func gutter(text string, muted lipgloss.Style) string {
 	return b.String()
 }
 
+// localRunSummary is the one-line status-bar echo of a finished local run.
+func localRunSummary(r runner.Result) string {
+	switch {
+	case r.BuildErr != "":
+		return "local: build error"
+	case r.Total == 0:
+		return "local: no verified cases"
+	default:
+		return fmt.Sprintf("local: %d/%d passed", r.Passed, r.Total)
+	}
+}
+
 // renderResults formats a run into the Results pane body.
 func renderResults(th Theme, res *runner.Result, runErr error, running bool, spin string, width int) string {
 	switch {
@@ -277,4 +289,32 @@ func truncate(s string, max int) string {
 		max = 1
 	}
 	return ansi.Truncate(s, max, "…")
+}
+
+// renderSplitStatusLine lays out a status/spinner message flush right and the
+// shortcut hints flush left, so status text changing length (a sync
+// progressing, a run finishing) never shifts the hints out from under the
+// user's fingers — hints always start at column 0, whatever their length.
+//
+// Status gets priority for space: it's live feedback for whatever the user
+// just triggered (a run/submit verdict, a sync result, an actionable "run
+// `lazyleet auth`" nudge), while the hints are static reference material
+// available in full via `?` help. So hints truncate (and finally disappear)
+// to make room for it, not the other way around; status is only truncated if
+// it alone doesn't fit the line.
+func renderSplitStatusLine(hints, status string, w int) string {
+	if status == "" {
+		return truncate(hints, w)
+	}
+	statusW := lipgloss.Width(status)
+	if statusW >= w {
+		return truncate(status, w)
+	}
+	avail := w - statusW - 1 // reserve one separating space for hints
+	if avail <= 0 {
+		return truncate(status, w)
+	}
+	hints = truncate(hints, avail)
+	gap := w - lipgloss.Width(hints) - statusW
+	return hints + strings.Repeat(" ", gap) + status
 }
