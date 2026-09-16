@@ -81,19 +81,24 @@ type WorkspaceModel struct {
 	// submission's one failing case) turned out not to work.
 	remoteRunCases []testcase.Case
 
-	watcher           *workspace.Watcher
-	statusMsg         string
-	showHelp          bool
-	cases             *caseManager
-	history           attempt.Repository
-	showHistory       bool
-	historyGeneration int
-	historyLoading    bool
-	historyDetail     bool
-	historyCursor     int
-	historyEntries    []attempt.Entry
-	historyErr        error
-	historyVP         viewport.Model
+	watcher            *workspace.Watcher
+	statusMsg          string
+	showHelp           bool
+	showHints          bool
+	hintsRevealed      int
+	hints              viewport.Model
+	hintsRenderer      *glamour.TermRenderer
+	hintsRendererWidth int
+	cases              *caseManager
+	history            attempt.Repository
+	showHistory        bool
+	historyGeneration  int
+	historyLoading     bool
+	historyDetail      bool
+	historyCursor      int
+	historyEntries     []attempt.Entry
+	historyErr         error
+	historyVP          viewport.Model
 
 	// pendingRunNote overrides the generic "local: N/M passed" status-bar
 	// summary the next time a run finishes — used by an auto-triggered run
@@ -449,6 +454,9 @@ func (m *WorkspaceModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.relayout()
 		m.sizeCaseForm()
 		m.ready = true
+		if m.showHints {
+			m.sizeHints()
+		}
 		if m.historyDetail {
 			m.resizeHistoryDetail()
 		}
@@ -570,6 +578,9 @@ func (m *WorkspaceModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *WorkspaceModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.showHints {
+		return m.handleHintsKey(msg)
+	}
 	if m.showHistory {
 		return m.handleHistoryKey(msg)
 	}
@@ -615,6 +626,8 @@ func (m *WorkspaceModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.startRemote("submit")
 	case key.Matches(msg, m.keys.Import):
 		return m.importFailingCase()
+	case key.Matches(msg, m.keys.Hints):
+		return m.openHints()
 	case key.Matches(msg, m.keys.History):
 		m.showHistory = true
 		m.historyDetail = false
@@ -683,6 +696,12 @@ func (m *WorkspaceModel) paneAt(x, y int) (Pane, bool) {
 // cursor is already at the top (wheel-up) or bottom (wheel-down) of its content.
 // See WheelEdgeFilter.
 func (m *WorkspaceModel) wheelAtEdge(msg tea.MouseMsg) bool {
+	if m.showHints {
+		if msg.Button == tea.MouseButtonWheelUp {
+			return m.hints.AtTop()
+		}
+		return m.hints.AtBottom()
+	}
 	if m.showHistory {
 		if !m.historyDetail {
 			return true
@@ -707,6 +726,11 @@ func (m *WorkspaceModel) wheelAtEdge(msg tea.MouseMsg) bool {
 }
 
 func (m *WorkspaceModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	if m.showHints {
+		var cmd tea.Cmd
+		m.hints, cmd = m.hints.Update(msg)
+		return m, cmd
+	}
 	if m.showHistory {
 		if m.historyDetail {
 			var cmd tea.Cmd
@@ -847,6 +871,9 @@ func (m *WorkspaceModel) View() (out string) {
 	if !m.ready {
 		return "loading workspace…"
 	}
+	if m.showHints {
+		return m.hintsView()
+	}
 	if m.showHistory {
 		return m.historyView()
 	}
@@ -968,6 +995,7 @@ func (m *WorkspaceModel) renderHelp() string {
 		{"s", "submit to LeetCode (needs `lazyleet auth`)"},
 		{"i", "import the last failing case as a local test"},
 		{"t", "manage test cases (add, edit, delete)"},
+		{"h", "open hints (hidden until you reveal them)"},
 		{"a", "recent local and remote attempt history"},
 		{"b", "back"}, {"?", "toggle this help"}, {"q", "back to browse"},
 	}

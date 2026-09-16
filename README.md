@@ -175,7 +175,8 @@ A failed prefetch reports an error while keeping previously cached plans.
 
 In the workspace: `e` edit in `$EDITOR` · `r` run local tests · `R` run on
 LeetCode · `s` submit · `i` import the last failing case · `tab` switch pane ·
-`j`/`k` scroll · `z` zoom · `t` manage tests · `b`/`q` back to browse. Saving the solution file
+`j`/`k` scroll · `z` zoom · `t` manage tests · `h` hints · `a` attempt history ·
+`b`/`q` back to browse. Saving the solution file
 (from `$EDITOR` or any other editor) re-runs the local tests automatically.
 `R`/`s` need `lazyleet auth`. If prompted, run it in another terminal, then
 retry the key in your existing workspace. In an already-open browse screen,
@@ -208,6 +209,18 @@ Esc to cancel. Close the manager with Esc and press `r` to run your updated
 cases. Saves preserve comments and untouched cases in `testcases.jsonl` and
 replace the file atomically. If another editor changed the file, cancel the
 edit and press `r` in the manager to reload before trying again.
+
+### Hints
+
+Press `h` in a workspace to open hints. They start hidden: Enter or `n`
+reveals one hint at a time, `H` hides all hints, and Esc returns to the
+workspace. Use arrow keys or Page Up/Down to scroll long hints. Revealed hints
+remain visible when you reopen the panel in the same workspace; reopening the
+problem resets them to hidden.
+
+Hints are stored with problem details and work offline, including from an
+expired cache when a refresh fails. Older caches may not contain hints; use
+`lazyleet solve <slug> --refresh` while online to fetch them.
 
 ### Attempt history
 

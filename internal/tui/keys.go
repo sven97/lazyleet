@@ -13,6 +13,7 @@ type KeyMap struct {
 	Submit   key.Binding
 	Import   key.Binding
 	Tests    key.Binding
+	Hints    key.Binding
 	History  key.Binding
 	Zoom     key.Binding
 	Up       key.Binding
@@ -34,6 +35,7 @@ func DefaultKeyMap() KeyMap {
 		RunLC:    key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "run @LC")),
 		Submit:   key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "submit")),
 		Import:   key.NewBinding(key.WithKeys("i"), key.WithHelp("i", "import failing case")),
+		Hints:    key.NewBinding(key.WithKeys("h"), key.WithHelp("h", "hints")),
 		History:  key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "history")),
 		Tests:    key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "tests")),
 		Zoom:     key.NewBinding(key.WithKeys("z", "+"), key.WithHelp("z", "zoom")),
@@ -63,6 +65,7 @@ func (k KeyMap) shortcutHints() []hint {
 		{k.Submit.Help().Key, k.Submit.Help().Desc},
 		{k.Import.Help().Key, "import"}, // full desc ("import failing case") is in `?` help
 		{k.Tests.Help().Key, k.Tests.Help().Desc},
+		{k.Hints.Help().Key, k.Hints.Help().Desc},
 		{k.History.Help().Key, k.History.Help().Desc},
 		{k.NextPane.Help().Key, k.NextPane.Help().Desc},
 		{k.Zoom.Help().Key, k.Zoom.Help().Desc},
