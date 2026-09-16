@@ -59,7 +59,7 @@ jobs:
       # `brews` deprecation notice even though `brews` still works fine
       # (see .goreleaser.yaml). `build --snapshot` below still validates the
       # config end-to-end.
-      - uses: goreleaser/goreleaser-action@v6
+      - uses: goreleaser/goreleaser-action@v7
         with:
           version: "~> v2"
           args: build --snapshot --clean --single-target
