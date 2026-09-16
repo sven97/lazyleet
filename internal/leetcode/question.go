@@ -6,12 +6,18 @@ import "github.com/sven97/lazyleet/internal/testcase"
 // The Phase 1 API client will populate this from LeetCode's GraphQL; until then
 // Fixture provides bundled samples so the workspace UI can be built and tested.
 type Question struct {
-	FrontendID   int               // the number shown to users (e.g. 1 for Two Sum)
-	QuestionID   int               // LeetCode's internal id, needed for run/submit
-	Slug         string            // URL slug, e.g. "two-sum"
-	Title        string            // "Two Sum"
-	Difficulty   string            // Easy | Medium | Hard
-	Hints        []string          // Markdown hints, revealed only on request
+	FrontendID int      // the number shown to users (e.g. 1 for Two Sum)
+	QuestionID int      // LeetCode's internal id, needed for run/submit
+	Slug       string   // URL slug, e.g. "two-sum"
+	Title      string   // "Two Sum"
+	Difficulty string   // Easy | Medium | Hard
+	Hints      []string // Markdown hints, revealed only on request
+	// HintsFetched reports whether Hints reflects an actual attempt to read
+	// hints from LeetCode (possibly finding none), as opposed to a cached
+	// question predating hints support, where Hints is simply unset. Lets the
+	// UI tell "this problem genuinely has no hints" apart from "hints were
+	// never fetched for this cache entry".
+	HintsFetched bool
 	Statement    string            // Markdown (converted from LeetCode HTML)
 	Meta         Meta              // the entry point the judge calls
 	CodeSnippets map[string]string // language slug -> starter code

@@ -17,11 +17,15 @@ func TestQuestionCacheRoundTrip(t *testing.T) {
 	}
 
 	orig.Hints = []string{"Use a **map**", "Look up the complement."}
+	orig.HintsFetched = true
 	row := store.Problem{FrontendID: 1, Title: "Two Sum", Difficulty: "Easy"}
 	got := questionFromCache(cacheFromQuestion(orig), row)
 
 	if !reflect.DeepEqual(got.Hints, orig.Hints) {
 		t.Fatalf("hints lost: %q", got.Hints)
+	}
+	if !got.HintsFetched {
+		t.Fatal("HintsFetched lost across cache round trip")
 	}
 	if got.Slug != orig.Slug || got.QuestionID != orig.QuestionID {
 		t.Fatalf("identity lost: %+v", got)
@@ -40,6 +44,36 @@ func TestQuestionCacheRoundTrip(t *testing.T) {
 	}
 	if got.Title != "Two Sum" || got.Difficulty != "Easy" {
 		t.Fatalf("row fields not applied: %q %q", got.Title, got.Difficulty)
+	}
+}
+
+// TestHintsFetchedDistinguishesEmptyFromStaleCache verifies that a problem
+// with genuinely no hints (fetched, HintsFetched=true, Hints empty) is
+// distinguishable from a cache row written before hints support existed
+// (HintsFetched=false, the column default) — both end up with the same
+// empty "hints" JSON, so HintsFetched is the only signal available.
+func TestHintsFetchedDistinguishesEmptyFromStaleCache(t *testing.T) {
+	orig, ok := leetcode.Fixture("two-sum")
+	if !ok {
+		t.Fatal("fixture missing")
+	}
+	row := store.Problem{FrontendID: 1, Title: "Two Sum", Difficulty: "Easy"}
+
+	// Genuinely fetched, genuinely no hints.
+	orig.Hints = nil
+	orig.HintsFetched = true
+	got := questionFromCache(cacheFromQuestion(orig), row)
+	if len(got.Hints) != 0 || !got.HintsFetched {
+		t.Fatalf("genuinely-empty hints mis-cached: hints=%q fetched=%v", got.Hints, got.HintsFetched)
+	}
+
+	// A row as it would look if written before hints support existed: same
+	// empty hints JSON, but HintsFetched was never set.
+	orig.HintsFetched = false
+	staleCached := cacheFromQuestion(orig)
+	got = questionFromCache(staleCached, row)
+	if len(got.Hints) != 0 || got.HintsFetched {
+		t.Fatalf("stale pre-hints cache should read back as not-fetched: hints=%q fetched=%v", got.Hints, got.HintsFetched)
 	}
 }
 

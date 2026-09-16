@@ -16,20 +16,30 @@ func (m *WorkspaceModel) openHints() (tea.Model, tea.Cmd) {
 }
 
 func (m *WorkspaceModel) sizeHints() {
-	offset := m.hints.YOffset
-	m.hints = viewport.New(max(1, m.width-2), max(1, m.height-3))
-	m.hints.MouseWheelEnabled = true
+	w, h := max(1, m.width-2), max(1, m.height-3)
+	if m.hints.Width == 0 && m.hints.Height == 0 {
+		m.hints = viewport.New(w, h)
+		m.hints.MouseWheelEnabled = true
+	} else {
+		m.hints.Width, m.hints.Height = w, h
+	}
 	m.refreshHints()
-	m.hints.SetYOffset(offset)
 }
 
 func (m *WorkspaceModel) refreshHints() {
 	var b strings.Builder
-	if len(m.q.Hints) == 0 {
-		b.WriteString("No hints are available for this cached problem.\n\nTo fetch current problem data, reopen with:\n\nlazyleet solve " + m.q.Slug + " --refresh\n")
-	} else if m.hintsRevealed == 0 {
+	switch {
+	case !m.q.HintsFetched:
+		// The cache predates hints support (or hints simply haven't been
+		// fetched yet) — we don't actually know if this problem has hints.
+		b.WriteString("Hints haven't been cached yet for this problem.\n\nTo fetch them, reopen with:\n\nlazyleet solve " + m.q.Slug + " --refresh\n")
+	case len(m.q.Hints) == 0:
+		// Hints were fetched and this problem genuinely has none; refreshing
+		// would never change that.
+		b.WriteString("This problem has no hints on LeetCode.\n")
+	case m.hintsRevealed == 0:
 		b.WriteString("Hints are hidden. Press Enter to reveal the first hint.\n")
-	} else {
+	default:
 		for i, hint := range m.q.Hints[:m.hintsRevealed] {
 			fmt.Fprintf(&b, "## Hint %d\n\n%s\n\n", i+1, hint)
 		}
@@ -39,7 +49,14 @@ func (m *WorkspaceModel) refreshHints() {
 			b.WriteString("All hints revealed.\n")
 		}
 	}
-	body, _ := renderStatementMD(newStatementRenderer(m.hints.Width), b.String(), m.hints.Width, nil)
+	w := m.hints.Width
+	if m.hintsRenderer == nil || m.hintsRendererWidth != w {
+		if r := newStatementRenderer(w); r != nil {
+			m.hintsRenderer = r
+			m.hintsRendererWidth = w
+		}
+	}
+	body, _ := renderStatementMD(m.hintsRenderer, b.String(), w, nil)
 	m.hints.SetContent(strings.TrimRight(body, "\n"))
 }
 

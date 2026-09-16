@@ -140,6 +140,7 @@ func (c *Client) QuestionDetail(ctx context.Context, slug string) (Question, err
 		ExampleTestcases: q.ExampleTestcases,
 	}
 
+	out.HintsFetched = true
 	for _, raw := range q.Hints {
 		hint := raw
 		if md, err := htmltomarkdown.ConvertString(preprocessStatementHTML(raw)); err == nil {

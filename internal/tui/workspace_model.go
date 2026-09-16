@@ -78,12 +78,14 @@ type WorkspaceModel struct {
 	// submission's one failing case) turned out not to work.
 	remoteRunCases []testcase.Case
 
-	watcher       *workspace.Watcher
-	statusMsg     string
-	showHelp      bool
-	showHints     bool
-	hintsRevealed int
-	hints         viewport.Model
+	watcher            *workspace.Watcher
+	statusMsg          string
+	showHelp           bool
+	showHints          bool
+	hintsRevealed      int
+	hints              viewport.Model
+	hintsRenderer      *glamour.TermRenderer
+	hintsRendererWidth int
 
 	// returnToBrowse makes Back/Quit emit BackToBrowseMsg instead of tea.Quit
 	// so an owning AppModel can restore browse mode.

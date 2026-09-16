@@ -117,9 +117,10 @@ func (a *appContext) resolveQuestion(ctx context.Context, slug string, refresh b
 			row, _ := db.GetProblem(ctx, slug)
 			cached, haveCache = questionFromCache(d, row), true
 		}
-		if q, ok := leetcode.Fixture(slug); ok && !refresh {
+		if q, ok := leetcode.Fixture(slug); ok {
 			if haveCache {
 				q.Hints = cached.Hints
+				q.HintsFetched = cached.HintsFetched
 			}
 			return q, "fixture", nil
 		}
@@ -158,7 +159,12 @@ func (a *appContext) resolveQuestion(ctx context.Context, slug string, refresh b
 
 func cacheFromQuestion(q leetcode.Question) store.ProblemDetail {
 	snips, _ := json.Marshal(q.CodeSnippets)
-	hints, _ := json.Marshal(q.Hints)
+	var hintsJSON string
+	if len(q.Hints) > 0 {
+		if b, err := json.Marshal(q.Hints); err == nil {
+			hintsJSON = string(b)
+		}
+	}
 	var exCases string
 	if len(q.ExampleCases) > 0 {
 		if b, err := json.Marshal(q.ExampleCases); err == nil {
@@ -173,7 +179,8 @@ func cacheFromQuestion(q leetcode.Question) store.ProblemDetail {
 		ExampleTestcases: q.ExampleTestcases,
 		ExampleCasesJSON: exCases,
 		CodeSnippetsJSON: string(snips),
-		HintsJSON:        string(hints),
+		HintsJSON:        hintsJSON,
+		HintsFetched:     q.HintsFetched,
 	}
 }
 
@@ -200,6 +207,7 @@ func questionFromCache(d store.ProblemDetail, row store.Problem) leetcode.Questi
 		}
 	}
 	_ = json.Unmarshal([]byte(d.HintsJSON), &q.Hints)
+	q.HintsFetched = d.HintsFetched
 	// Prefer the cached cases with scraped expected outputs, if we have them.
 	var stored []testcase.Case
 	if json.Unmarshal([]byte(orDefault(d.ExampleCasesJSON, "[]")), &stored) == nil && len(stored) > 0 {
