@@ -278,3 +278,27 @@ func truncate(s string, max int) string {
 	}
 	return ansi.Truncate(s, max, "…")
 }
+
+// renderSplitStatusLine lays out hints flush left and status flush right, so
+// a status/spinner message changing length (a sync progressing, a run
+// finishing) never shifts the shortcut hints out from under the user's
+// fingers. hints is truncated first if the two don't both fit; status is
+// truncated (and finally dropped) after that.
+func renderSplitStatusLine(hints, status string, w int) string {
+	hintsW := lipgloss.Width(hints)
+	if status == "" || hintsW >= w {
+		return truncate(hints, w)
+	}
+	avail := w - hintsW
+	statusW := lipgloss.Width(status)
+	if statusW >= avail {
+		// Reserve at least one space so a truncated status never runs
+		// straight into the last hint with no gap.
+		if avail <= 1 {
+			return truncate(hints, w)
+		}
+		status = truncate(status, avail-1)
+		statusW = lipgloss.Width(status)
+	}
+	return hints + strings.Repeat(" ", avail-statusW) + status
+}

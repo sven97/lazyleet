@@ -783,11 +783,11 @@ func (m *WorkspaceModel) renderStatusBar() string {
 	}
 	w := m.width
 
-	left := ""
+	status := ""
 	if m.running {
-		left = m.th.Spinner.Render(m.spin.View()) + " running "
+		status = m.th.Spinner.Render(m.spin.View()) + " running"
 	} else if m.statusMsg != "" {
-		left = m.statusMsg + "  "
+		status = m.statusMsg
 	}
 
 	var segs []string
@@ -796,10 +796,7 @@ func (m *WorkspaceModel) renderStatusBar() string {
 	}
 	hints := strings.Join(segs, m.th.StatusDivider.Render(" │ "))
 
-	line := left + hints
-	if lipgloss.Width(line) > w {
-		line = truncate(line, w)
-	}
+	line := renderSplitStatusLine(hints, status, w)
 	return m.th.StatusBar.Width(w).Render(line)
 }
 
