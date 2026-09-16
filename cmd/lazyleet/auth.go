@@ -138,6 +138,26 @@ func finishAuth(cmd *cobra.Command, app *appContext, creds leetcode.Credentials,
 		return nil
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "authenticated as %s (%s)\n", user, source)
+	fmt.Fprintln(cmd.OutOrStdout(), "refreshing solve progress…")
+	// A first-time sign-in with an empty local cache chains a full paginated
+	// catalog fetch (tens of requests) plus two more paginated progress
+	// fetches, each bracketed by a session-liveness check, inside this one
+	// deadline — generous enough to survive a slow connection or large
+	// catalog without misreporting a slow warmup as a failure.
+	ctx, cancel := context.WithTimeout(cmd.Context(), 180*time.Second)
+	defer cancel()
+	client, err := app.newClient()
+	if err == nil {
+		var solved int
+		solved, err = refreshAuthProgress(ctx, app, client)
+		if err == nil {
+			fmt.Fprintf(cmd.OutOrStdout(), "progress synced · %d solved\n", solved)
+		}
+	}
+	if err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Signed in, but progress refresh failed: %v\nRetry with `lazyleet sync --progress`.\n", err)
+	}
+	fmt.Fprintln(cmd.OutOrStdout(), "In an open workspace, retry R/s; in browse, press s to refresh your account and progress.")
 	return nil
 }
 
@@ -165,4 +185,24 @@ func firstNonEmpty(a, b string) string {
 		return a
 	}
 	return b
+}
+
+// refreshAuthProgress also seeds an empty catalog on first sign-in so status
+// updates have rows to attach to.
+func refreshAuthProgress(ctx context.Context, app *appContext, client *leetcode.Client) (int, error) {
+	db, err := app.openStore()
+	if err != nil {
+		return 0, err
+	}
+	defer db.Close()
+	n, err := db.ProblemCount(ctx)
+	if err != nil {
+		return 0, err
+	}
+	if n == 0 {
+		if _, err := fetchAndCacheProblems(ctx, client, db, nil); err != nil {
+			return 0, err
+		}
+	}
+	return fetchAndCacheProgress(ctx, client, db)
 }

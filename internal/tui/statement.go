@@ -1,14 +1,70 @@
 package tui
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
+	"unicode"
 
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/sven97/lazyleet/internal/termimg"
 )
+
+// ProblemMeta is the header metadata shown above a problem's statement —
+// difficulty, acceptance rate, and topic tags. The browse Detail pane and the
+// workspace Statement pane both derive it from their own data source
+// (BrowseRow.Meta, or leetcode.Question directly) and render it through
+// renderProblemHeader, so the two panes can never drift apart in structure or
+// content. The title itself is left to the caller's pane/frame title.
+type ProblemMeta struct {
+	Difficulty string
+	ACRate     float64
+	PaidOnly   bool
+	Tags       []string
+}
+
+// problemTitle formats the "ID. Title" heading shared by the browse Detail
+// pane's frame title and the workspace Statement pane's pane title.
+func problemTitle(frontendID int, title string, paidOnly bool) string {
+	s := fmt.Sprintf("%d. %s", frontendID, title)
+	if paidOnly {
+		s = "🔒 " + s
+	}
+	return s
+}
+
+// humanizeTag turns a topic tag slug ("dynamic-programming") or an
+// already-readable name ("Array") into display form ("Dynamic Programming").
+func humanizeTag(s string) string {
+	words := strings.Fields(strings.ReplaceAll(s, "-", " "))
+	for i, w := range words {
+		r := []rune(w)
+		r[0] = unicode.ToUpper(r[0])
+		words[i] = string(r)
+	}
+	return strings.Join(words, " ")
+}
+
+// renderProblemHeader renders the difficulty/acceptance/tags line shown above
+// a problem's statement in both the browse Detail pane and the workspace
+// Statement pane.
+func renderProblemHeader(th Theme, meta ProblemMeta, width int) string {
+	line := fmt.Sprintf("%s   AC %.1f%%", DifficultyStyle(meta.Difficulty).Render(meta.Difficulty), meta.ACRate)
+	if meta.PaidOnly {
+		line += "  " + th.ErrorText.Render("🔒 paid-only")
+	}
+	out := truncate(line, width)
+	if len(meta.Tags) > 0 {
+		tags := make([]string, len(meta.Tags))
+		for i, t := range meta.Tags {
+			tags[i] = humanizeTag(t)
+		}
+		out += "\n" + truncate(th.Muted.Render(strings.Join(tags, " · ")), width)
+	}
+	return out + "\n"
+}
 
 // queueImagePrefix hands the Kitty transmit+placement escapes to the
 // ImageWriter so they're emitted just before the next frame (they can't ride in

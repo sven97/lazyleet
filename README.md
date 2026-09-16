@@ -155,7 +155,8 @@ lazyleet auth import --browser firefox
 lazyleet auth paste           # or: enter LEETCODE_SESSION + csrftoken yourself
 lazyleet auth browsers        # list detected browser cookie stores
 lazyleet auth status | logout
-# auth is only needed for `R` run / `s` submit on LeetCode
+# successful auth automatically refreshes your solve progress
+# auth is needed for personal progress and `R` run / `s` submit on LeetCode
 
 lazyleet debug list [--remote]     # cached (or live) problem list
 lazyleet debug problem <slug>      # fetch + print one problem's detail
@@ -171,7 +172,11 @@ In the workspace: `e` edit in `$EDITOR` · `r` run local tests · `R` run on
 LeetCode · `s` submit · `i` import the last failing case · `tab` switch pane ·
 `j`/`k` scroll · `z` zoom · `t` manage tests · `b`/`q` back to browse. Saving the solution file
 (from `$EDITOR` or any other editor) re-runs the local tests automatically.
-`R`/`s` need `lazyleet auth`. The workspace lives at
+`R`/`s` need `lazyleet auth`. If prompted, run it in another terminal, then
+retry the key in your existing workspace. In an already-open browse screen,
+press `s` after signing in to refresh account, progress, and daily indicators.
+If the post-login refresh fails, credentials remain saved; retry with
+`lazyleet sync --progress`. The workspace lives at
 `$XDG_DATA_HOME/lazyleet/workspace/<id>-<slug>/`.
 
 ### Managing test cases

@@ -31,8 +31,6 @@ type AppModel struct {
 	imgProto  termimg.Protocol
 	imgDir    string
 	imgWriter *ImageWriter
-
-	statusErr string // factory / open failure, shown via browse status
 }
 
 // NewAppModel wraps browse with a factory used when the user opens a problem.
@@ -133,7 +131,6 @@ func (m *AppModel) openWorkspace(slug string) (tea.Model, tea.Cmd) {
 		m.browse.statusMsg = "cannot open workspace: no factory configured"
 		return m, nil
 	}
-	m.statusErr = ""
 	m.browse.statusMsg = "opening problem…"
 	factory := m.factory
 	return m, func() tea.Msg {
@@ -144,8 +141,7 @@ func (m *AppModel) openWorkspace(slug string) (tea.Model, tea.Cmd) {
 
 func (m *AppModel) handleWorkspaceOpened(msg workspaceOpenedMsg) (tea.Model, tea.Cmd) {
 	if msg.err != nil {
-		m.browse.statusMsg = fmt.Sprintf("workspace: %v", msg.err)
-		m.statusErr = msg.err.Error()
+		m.browse.statusMsg = fmt.Sprintf("could not open problem: %v", msg.err)
 		return m, nil
 	}
 	ws := msg.ws
@@ -159,12 +155,13 @@ func (m *AppModel) handleWorkspaceOpened(msg workspaceOpenedMsg) (tea.Model, tea
 	m.workspace = ws
 	m.browse.Chosen = ""
 	m.browse.statusMsg = ""
-	m.statusErr = ""
 	return m, ws.Init()
 }
 
 func (m *AppModel) closeWorkspace() (tea.Model, tea.Cmd) {
+	var refresh bool
 	if m.workspace != nil {
+		refresh = m.workspace.ProgressChanged()
 		m.workspace.Close()
 		m.workspace = nil
 	}
@@ -172,7 +169,14 @@ func (m *AppModel) closeWorkspace() (tea.Model, tea.Cmd) {
 	if m.width > 0 {
 		_, cmd = m.browse.Update(tea.WindowSizeMsg{Width: m.width, Height: m.height})
 	}
-	return m, cmd
+	if !refresh {
+		return m, cmd
+	}
+	// An accepted submission changed cached solve status: reload the problem
+	// list (for the ✓ mark), auth (WhoAmI proved the session live), and the
+	// daily challenge (in case it was today's problem) so browse reflects it
+	// without a manual sync.
+	return m, tea.Batch(cmd, m.browse.loadProblems(), m.browse.loadAuth(), m.browse.loadDaily())
 }
 
 // InWorkspace reports whether the workspace child is active (tests / debug).

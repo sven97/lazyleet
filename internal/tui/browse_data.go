@@ -20,6 +20,11 @@ type BrowseRow struct {
 // Solved reports whether the row is marked accepted.
 func (r BrowseRow) Solved() bool { return r.Status == "ac" }
 
+// Meta returns the header metadata renderProblemHeader needs for this row.
+func (r BrowseRow) Meta() ProblemMeta {
+	return ProblemMeta{Difficulty: r.Difficulty, ACRate: r.ACRate, PaidOnly: r.PaidOnly, Tags: r.Tags}
+}
+
 // PlanRef identifies a study plan in the sidebar.
 type PlanRef struct {
 	Slug     string

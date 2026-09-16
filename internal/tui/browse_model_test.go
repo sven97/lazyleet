@@ -526,3 +526,53 @@ func TestBrowseDailyUnavailableIsSurfaced(t *testing.T) {
 		t.Fatalf("emptyListReason = %q, want an 'unavailable' message", got)
 	}
 }
+
+func TestExpiredSessionAndVerificationFailure(t *testing.T) {
+	m, _ := bootBrowse(t)
+	m.auth = AuthState{Authed: true, User: "old-user"}
+	step(&m, userLoadedMsg{err: context.DeadlineExceeded})
+	if !m.auth.Authed || !strings.Contains(m.statusMsg, "could not verify") {
+		t.Fatal("network failure misreported as logout")
+	}
+	step(&m, userLoadedMsg{})
+	if m.auth.Authed || m.auth.User != "" || !strings.Contains(m.statusMsg, "lazyleet auth") {
+		t.Fatal("expired session not cleared with recovery guidance")
+	}
+}
+
+func TestProgressReloadPreservesSelection(t *testing.T) {
+	m, f := bootBrowse(t)
+	m.selectSlug("valid-parentheses")
+	rows := append([]BrowseRow(nil), f.rows...)
+	rows[1].Status = "ac"
+	step(&m, browseLoadedMsg{rows: rows})
+	if m.currentSlug() != "valid-parentheses" {
+		t.Fatal("refresh moved selection")
+	}
+	row, _ := m.currentRow()
+	if !row.Solved() {
+		t.Fatal("refresh did not update solve indicator")
+	}
+}
+
+func TestAnonymousProgressFilterExplainsSignIn(t *testing.T) {
+	m, _ := bootBrowse(t)
+	step(&m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
+	if !strings.Contains(m.statusMsg, "lazyleet auth") || !strings.Contains(m.statusMsg, "press s") {
+		t.Fatal("missing sign-in and refresh guidance")
+	}
+}
+
+func TestManualSyncReloadsAccountAndDaily(t *testing.T) {
+	m, f := bootBrowse(t)
+	f.authed, f.user = true, "new-user"
+	f.daily.Done, f.daily.Streak = true, 4
+	_, cmd := m.Update(syncDoneMsg{count: len(f.rows)})
+	drain(&m, cmd)
+	if !m.auth.Authed {
+		t.Fatal("sync did not pick up new credentials")
+	}
+	if !m.daily.Done || m.daily.Streak != 4 {
+		t.Fatalf("daily not refreshed: %+v", m.daily)
+	}
+}
