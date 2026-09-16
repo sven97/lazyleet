@@ -125,31 +125,36 @@ func (w *Workspace) ReadCases() ([]testcase.Case, error) {
 // so a caller reporting the result to the user isn't left claiming a case was
 // imported when it was really a duplicate no-op.
 func (w *Workspace) AppendCases(add []testcase.Case) (added int, err error) {
-	existing, err := w.ReadCases()
-	if err != nil && !os.IsNotExist(err) {
+	snapshot, err := w.ReadCaseSnapshot()
+	if err != nil {
 		return 0, err
 	}
 	seen := map[string]bool{}
-	for _, c := range existing {
+	for _, c := range snapshot.Cases {
 		seen[strings.Join(c.In, "\x00")] = true
 	}
-	merged := existing
+	data := append([]byte(nil), snapshot.raw...)
 	for _, c := range add {
-		if k := strings.Join(c.In, "\x00"); !seen[k] {
-			seen[k] = true
-			merged = append(merged, c)
-			added++
+		k := strings.Join(c.In, "\x00")
+		if seen[k] {
+			continue
 		}
+		seen[k] = true
+		raw, err := json.Marshal(c)
+		if err != nil {
+			return 0, err
+		}
+		if len(data) > 0 && data[len(data)-1] != '\n' {
+			data = append(data, '\n')
+		}
+		data = append(data, raw...)
+		data = append(data, '\n')
+		added++
 	}
 	if added == 0 {
 		return 0, nil
 	}
-	f, err := os.Create(w.TestsPath)
-	if err != nil {
-		return 0, err
-	}
-	defer f.Close()
-	if err := testcase.Write(f, merged); err != nil {
+	if err := w.replaceCases(snapshot, data); err != nil {
 		return 0, err
 	}
 	return added, nil

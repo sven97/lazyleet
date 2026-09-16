@@ -175,7 +175,7 @@ A failed prefetch reports an error while keeping previously cached plans.
 
 In the workspace: `e` edit in `$EDITOR` · `r` run local tests · `R` run on
 LeetCode · `s` submit · `i` import the last failing case · `tab` switch pane ·
-`j`/`k` scroll · `z` zoom · `b`/`q` back to browse. Saving the solution file
+`j`/`k` scroll · `z` zoom · `t` manage tests · `b`/`q` back to browse. Saving the solution file
 (from `$EDITOR` or any other editor) re-runs the local tests automatically.
 `R`/`s` need `lazyleet auth`. If prompted, run it in another terminal, then
 retry the key in your existing workspace. In an already-open browse screen,
@@ -183,6 +183,19 @@ press `s` after signing in to refresh account, progress, and daily indicators.
 If the post-login refresh fails, credentials remain saved; retry with
 `lazyleet sync --progress`. The workspace lives at
 `$XDG_DATA_HOME/lazyleet/workspace/<id>-<slug>/`.
+
+### Managing test cases
+
+Press `t` in a workspace to open the test-case manager. Use `j`/`k` or arrow
+keys to select a case, `a` to add, `e`/Enter to edit, and `d` to delete with
+confirmation. The `i` shortcut still imports the last failing remote case.
+
+Enter one JSON input value per line, in the parameter order shown, and an
+optional JSON expected result. Use Tab to switch fields, Ctrl+S to save, and
+Esc to cancel. Close the manager with Esc and press `r` to run your updated
+cases. Saves preserve comments and untouched cases in `testcases.jsonl` and
+replace the file atomically. If another editor changed the file, cancel the
+edit and press `r` in the manager to reload before trying again.
 
 ### Local judge languages
 
