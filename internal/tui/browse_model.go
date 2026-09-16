@@ -89,6 +89,12 @@ type BrowseModel struct {
 	// rendered preview bodies keyed by slug|width|tab|hasImages (glamour is
 	// slow; keep re-visits and re-renders instant)
 	renderCache map[string]previewEntry
+	// previewRenderedKey/Body identify the content currently sitting in
+	// previewVP, so a refresh triggered by an unrelated background reload
+	// (auth/daily/etc.) doesn't yank the scroll position back to the top when
+	// the displayed content hasn't actually changed.
+	previewRenderedKey  string
+	previewRenderedBody string
 
 	imgProto   termimg.Protocol
 	imgDir     string
@@ -199,14 +205,19 @@ func (m *BrowseModel) loadAuth() tea.Cmd {
 	return func() tea.Msg { return authLoadedMsg{a: m.data.Auth(context.Background())} }
 }
 
-type userLoadedMsg struct{ name string }
+type userLoadedMsg struct {
+	name string
+	err  error
+}
 
 // loadUser resolves the signed-in username in the background; a slow or failing
-// request just leaves the Account section showing "signed in".
+// request preserves the account state and reports the verification failure.
 func (m *BrowseModel) loadUser() tea.Cmd {
 	return func() tea.Msg {
-		name, _ := m.data.CurrentUser(context.Background())
-		return userLoadedMsg{name: name}
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		name, err := m.data.CurrentUser(ctx)
+		return userLoadedMsg{name: name, err: err}
 	}
 }
 
@@ -272,6 +283,13 @@ func (m *BrowseModel) progressCmd() tea.Cmd {
 	}
 }
 
+// rearmAutoSync clears the one-shot guard so maybeSyncProgress will fire
+// again — used whenever something makes the cached progress worth
+// re-checking (an auth-state flip, an explicit sync).
+func (m *BrowseModel) rearmAutoSync() {
+	m.autoSynced = false
+}
+
 // maybeSyncProgress kicks a one-shot background refresh of the signed-in user's
 // solve status (a few requests, not the whole catalog) so the ✓ marks and
 // per-plan counts reflect problems solved on the web. Runs once per session,
@@ -279,7 +297,7 @@ func (m *BrowseModel) progressCmd() tea.Cmd {
 // both the browseLoadedMsg and authLoadedMsg handlers since either may land
 // last.
 func (m *BrowseModel) maybeSyncProgress() tea.Cmd {
-	if m.autoSynced || m.syncing || !m.auth.Authed || len(m.allRows) == 0 {
+	if m.autoSynced || m.progressing || m.syncing || !m.auth.Authed || len(m.allRows) == 0 {
 		return nil
 	}
 	m.autoSynced = true
@@ -333,7 +351,9 @@ func (m *BrowseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !msg.progressSync.IsZero() {
 			m.progressSync = msg.progressSync
 		}
+		selected := m.currentSlug()
 		m.rebuildView()
+		m.selectSlug(selected)
 		// attemptRestore may move the cursor (e.g. onto a remembered problem);
 		// call it before debouncePreview so the debounce captures where the
 		// cursor actually ends up, not row 0.
@@ -348,19 +368,28 @@ func (m *BrowseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(restoreCmd, m.debouncePreview())
 
 	case authLoadedMsg:
+		if m.auth.Authed != msg.a.Authed {
+			m.rearmAutoSync()
+		}
 		m.auth = msg.a
 		var cmds []tea.Cmd
 		if m.auth.Authed {
 			cmds = append(cmds, m.loadUser())
 		}
-		cmds = append(cmds, m.maybeSyncProgress())
+		cmds = append(cmds, m.maybeSyncProgress(), m.refreshDetail())
 		return m, tea.Batch(cmds...)
 
 	case userLoadedMsg:
-		if msg.name != "" {
+		if msg.err != nil {
+			m.statusMsg = "could not verify session: " + msg.err.Error()
+		} else if msg.name == "" && m.auth.Authed {
+			m.auth.Authed = false
+			m.auth.User = ""
+			m.statusMsg = "session expired — run `lazyleet auth`, then press s"
+		} else {
 			m.auth.User = msg.name
 		}
-		return m, nil
+		return m, m.refreshDetail()
 
 	case dailyLoadedMsg:
 		m.dailyLoaded = true
@@ -370,9 +399,9 @@ func (m *BrowseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.activeSourceKind() == srcDaily {
 			m.rebuildView()
-			return m, m.debouncePreview()
+			return m, tea.Batch(m.debouncePreview(), m.refreshDetail())
 		}
-		return m, nil
+		return m, m.refreshDetail()
 
 	case plansLoadedMsg:
 		m.sources = m.sources[:2] // keep "All Problems" + "Daily Question"
@@ -439,6 +468,7 @@ func (m *BrowseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.key == m.previewKey() && !m.detailShowsStatus {
 			m.previewVP.SetContent(msg.content)
 			m.previewVP.GotoTop()
+			m.previewRenderedKey = msg.key
 			m.previewContentSlug = m.previewSlug
 			m.imgWritten = queueImagePrefix(m.imgWriter, msg.prefix, m.imgWritten)
 		}
@@ -451,7 +481,7 @@ func (m *BrowseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.statusMsg = fmt.Sprintf("synced %d problems", msg.count)
-		return m, m.loadProblems()
+		return m, tea.Batch(m.loadProblems(), m.loadAuth(), m.loadDaily())
 
 	case progressDoneMsg:
 		m.progressing = false
@@ -461,7 +491,7 @@ func (m *BrowseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.progressSync = time.Now()
 		m.statusMsg = fmt.Sprintf("progress synced · %d solved", msg.solved)
-		return m, m.loadProblems()
+		return m, tea.Batch(m.loadProblems(), m.loadDaily(), m.refreshDetail())
 
 	case tea.MouseMsg:
 		return m.handleMouse(msg)
@@ -637,7 +667,8 @@ func (m *BrowseModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case key.Matches(msg, m.keys.Sync):
-		if !m.syncing {
+		if !m.syncing && !m.progressing {
+			m.rearmAutoSync()
 			m.syncing = true
 			m.statusMsg = "syncing…"
 			return m, tea.Batch(m.syncCmd(), m.spin.Tick)
@@ -673,6 +704,9 @@ func (m *BrowseModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.fltDiff = cycleDifficulty(m.fltDiff)
 		return m.afterListChange()
 	case key.Matches(msg, m.keys.FilterStatus):
+		if !m.auth.Authed {
+			m.statusMsg = "for your solve progress, run `lazyleet auth` in another terminal, then press s"
+		}
 		m.fltStatus = cycleStatus(m.fltStatus)
 		return m.afterListChange()
 	case key.Matches(msg, m.keys.FilterPaid):
@@ -1144,8 +1178,12 @@ func (m *BrowseModel) setFocus(reg Region) {
 // pane's expanded info when it is focused, otherwise the problem statement.
 func (m *BrowseModel) refreshDetail() tea.Cmd {
 	if m.detailShowsStatus {
-		m.previewVP.SetContent(m.statusDetailBody())
-		m.previewVP.GotoTop()
+		body := m.statusDetailBody()
+		if body != m.previewRenderedBody {
+			m.previewVP.SetContent(body)
+			m.previewVP.GotoTop()
+			m.previewRenderedBody = body
+		}
 		return nil
 	}
 	return m.refreshPreviewContent()
@@ -1188,8 +1226,11 @@ func (m *BrowseModel) refreshPreviewContent() tea.Cmd {
 	}
 	key := m.previewKey()
 	if e, ok := m.renderCache[key]; ok {
-		m.previewVP.SetContent(e.content)
-		m.previewVP.GotoTop()
+		if key != m.previewRenderedKey {
+			m.previewVP.SetContent(e.content)
+			m.previewVP.GotoTop()
+			m.previewRenderedKey = key
+		}
 		m.previewContentSlug = m.previewSlug
 		m.imgWritten = queueImagePrefix(m.imgWriter, e.prefix, m.imgWritten)
 		return nil

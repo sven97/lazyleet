@@ -164,7 +164,9 @@ func (m *AppModel) handleWorkspaceOpened(msg workspaceOpenedMsg) (tea.Model, tea
 }
 
 func (m *AppModel) closeWorkspace() (tea.Model, tea.Cmd) {
+	var refresh bool
 	if m.workspace != nil {
+		refresh = m.workspace.ProgressChanged()
 		m.workspace.Close()
 		m.workspace = nil
 	}
@@ -172,7 +174,14 @@ func (m *AppModel) closeWorkspace() (tea.Model, tea.Cmd) {
 	if m.width > 0 {
 		_, cmd = m.browse.Update(tea.WindowSizeMsg{Width: m.width, Height: m.height})
 	}
-	return m, cmd
+	if !refresh {
+		return m, cmd
+	}
+	// An accepted submission changed cached solve status: reload the problem
+	// list (for the ✓ mark), auth (WhoAmI proved the session live), and the
+	// daily challenge (in case it was today's problem) so browse reflects it
+	// without a manual sync.
+	return m, tea.Batch(cmd, m.browse.loadProblems(), m.browse.loadAuth(), m.browse.loadDaily())
 }
 
 // InWorkspace reports whether the workspace child is active (tests / debug).
