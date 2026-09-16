@@ -55,13 +55,15 @@ type WorkspaceModel struct {
 	codeSrc      string
 	ranSrc       string // codeSrc as of the last local run started
 
-	runner    runner.Runner
-	runnerErr error // why there is no local runner for this language, if so
-	running   bool
-	runGen    int
-	spin      spinner.Model
-	lastRun   *runner.Result
-	lastErr   error
+	runner        runner.Runner
+	runnerErr     error // why there is no local runner for this language, if so
+	running       bool
+	runGen        int
+	spin          spinner.Model
+	lastRun       *runner.Result
+	casesRevision int
+	casesUnrun    bool
+	lastErr       error
 
 	// remote run / submit against LeetCode
 	remote        RemoteJudge
@@ -81,6 +83,7 @@ type WorkspaceModel struct {
 	watcher   *workspace.Watcher
 	statusMsg string
 	showHelp  bool
+	cases     *caseManager
 
 	// pendingRunNote overrides the generic "local: N/M passed" status-bar
 	// summary the next time a run finishes — used by an auto-triggered run
@@ -106,8 +109,9 @@ func (m *WorkspaceModel) ProgressChanged() bool { return m.progressChanged }
 type fileChangedMsg struct{}
 type runDebounceMsg struct{ gen int }
 type runFinishedMsg struct {
-	res runner.Result
-	err error
+	casesRevision int
+	res           runner.Result
+	err           error
 }
 type editorFinishedMsg struct{ err error }
 type remoteDoneMsg struct {
@@ -253,10 +257,11 @@ func (m *WorkspaceModel) waitForFileChange() tea.Cmd {
 func (m *WorkspaceModel) runCmd() tea.Cmd {
 	ws := m.ws
 	meta := m.q.Meta
+	revision := m.casesRevision
 	return func() tea.Msg {
 		cases, err := ws.ReadCases()
 		if err != nil {
-			return runFinishedMsg{err: fmt.Errorf("read test cases: %w", err)}
+			return runFinishedMsg{casesRevision: revision, err: fmt.Errorf("read test cases: %w", err)}
 		}
 		res, err := m.runner.Run(context.Background(), runner.Spec{
 			Lang:         ws.Lang,
@@ -264,7 +269,7 @@ func (m *WorkspaceModel) runCmd() tea.Cmd {
 			Meta:         meta,
 			Cases:        cases,
 		})
-		return runFinishedMsg{res: res, err: err}
+		return runFinishedMsg{casesRevision: revision, res: res, err: err}
 	}
 }
 
@@ -282,6 +287,7 @@ func (m *WorkspaceModel) startRun() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.runGen++
+	m.casesUnrun = false
 	m.running = true
 	m.lastErr = nil
 	m.showRemote = false
@@ -370,6 +376,14 @@ func (m *WorkspaceModel) importFailingCase() (tea.Model, tea.Cmd) {
 	msg := fmt.Sprintf("imported %d case(s) → testcases.jsonl", added)
 	if added == 0 {
 		msg = "already have this case in testcases.jsonl"
+	} else {
+		// testcases.jsonl changed on disk: invalidate the same way add/edit/
+		// delete do (reloadCaseList's invalidate=true path), so an in-flight
+		// run started before this import gets discarded as stale by the
+		// runFinishedMsg guard instead of overwriting the post-import result.
+		// Must happen before startRun() below so the run it kicks off is
+		// itself stamped with the post-import revision.
+		m.invalidateCases()
 	}
 	// startRun() clears statusMsg as part of kicking off a normal run, and the
 	// run's own completion normally overwrites it with a pass/fail summary —
@@ -396,6 +410,7 @@ func (m *WorkspaceModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.relayout()
+		m.sizeCaseForm()
 		m.ready = true
 		return m, nil
 
@@ -416,6 +431,13 @@ func (m *WorkspaceModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case runFinishedMsg:
 		m.running = false
+		if msg.casesRevision != m.casesRevision {
+			m.lastRun = nil
+			m.lastErr = nil
+			m.statusMsg = "test cases changed · press r to run again"
+			m.refreshResults()
+			return m, nil
+		}
 		m.lastErr = msg.err
 		if msg.err == nil {
 			r := msg.res
@@ -475,10 +497,22 @@ func (m *WorkspaceModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 
+	if m.cases != nil && m.cases.editing {
+		var cmd tea.Cmd
+		if m.cases.focus == 0 {
+			m.cases.inputs, cmd = m.cases.inputs.Update(msg)
+		} else {
+			m.cases.expected, cmd = m.cases.expected.Update(msg)
+		}
+		return m, cmd
+	}
 	return m, nil
 }
 
 func (m *WorkspaceModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.cases != nil {
+		return m.handleCaseKey(msg)
+	}
 	switch {
 	case key.Matches(msg, m.keys.Quit), key.Matches(msg, m.keys.Back):
 		m.Close()
@@ -519,8 +553,7 @@ func (m *WorkspaceModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.Import):
 		return m.importFailingCase()
 	case key.Matches(msg, m.keys.Tests):
-		m.statusMsg = "test-case manager isn't built yet — edit testcases.jsonl directly for now"
-		return m, nil
+		return m.openCaseManager()
 	case key.Matches(msg, m.keys.Up):
 		m.focusedViewport().ScrollUp(2)
 		return m, nil
@@ -598,6 +631,9 @@ func (m *WorkspaceModel) wheelAtEdge(msg tea.MouseMsg) bool {
 }
 
 func (m *WorkspaceModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	if m.cases != nil {
+		return m, nil
+	}
 	p, ok := m.paneAt(msg.X, msg.Y)
 	if !ok {
 		return m, nil
@@ -703,10 +739,10 @@ func (m *WorkspaceModel) refreshResults() {
 	m.results.SetContent(body)
 }
 
-// codeChangedSinceRun reports whether the mirrored solution differs from what
-// the last local run executed. False before any run.
+// codeChangedSinceRun reports whether the solution or managed test cases have
+// changed since the last local run.
 func (m *WorkspaceModel) codeChangedSinceRun() bool {
-	return m.ranSrc != "" && m.codeSrc != m.ranSrc
+	return m.casesUnrun || (m.ranSrc != "" && m.codeSrc != m.ranSrc)
 }
 
 func (m *WorkspaceModel) reloadCode() {
@@ -726,6 +762,9 @@ func (m *WorkspaceModel) View() (out string) {
 	}
 	if !m.ready {
 		return "loading workspace…"
+	}
+	if m.cases != nil {
+		return m.caseManagerView()
 	}
 	if m.showHelp {
 		return m.renderHelp()
@@ -841,6 +880,7 @@ func (m *WorkspaceModel) renderHelp() string {
 		{"R", "run on LeetCode (needs `lazyleet auth`)"},
 		{"s", "submit to LeetCode (needs `lazyleet auth`)"},
 		{"i", "import the last failing case as a local test"},
+		{"t", "manage test cases (add, edit, delete)"},
 		{"b", "back"}, {"?", "toggle this help"}, {"q", "back to browse"},
 	}
 	var b strings.Builder

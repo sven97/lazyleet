@@ -139,7 +139,8 @@ Requires Go 1.27+. The SQLite driver is pure Go, so no C toolchain is needed.
 ## Usage (so far)
 
 ```sh
-lazyleet sync                 # cache the full problem list + study plans locally
+lazyleet sync                 # cache the full problem list + bundled study plans
+lazyleet sync --plans         # also prefetch official plans for offline use
 lazyleet                      # browse mode: sidebar · list · preview
                               #   / fuzzy filter · d/f/p filter · S sort · c clear
                               #   tab panes · enter opens workspace · s sync · ? help
@@ -167,10 +168,14 @@ lazyleet --version
 
 Problem data is read from a bundled fixture, then the local SQLite cache, then
 LeetCode (no login required for public problems; results are cached afterwards).
+Official study plans refresh according to `cache_ttl`; if a refresh fails,
+browse and `debug plan` can still use the cached plan. `sync --plans` checks
+plans even when the problem catalog is fresh; add `--force` to refresh both.
+A failed prefetch reports an error while keeping previously cached plans.
 
 In the workspace: `e` edit in `$EDITOR` · `r` run local tests · `R` run on
 LeetCode · `s` submit · `i` import the last failing case · `tab` switch pane ·
-`j`/`k` scroll · `z` zoom · `b`/`q` back to browse. Saving the solution file
+`j`/`k` scroll · `z` zoom · `t` manage tests · `b`/`q` back to browse. Saving the solution file
 (from `$EDITOR` or any other editor) re-runs the local tests automatically.
 `R`/`s` need `lazyleet auth`. If prompted, run it in another terminal, then
 retry the key in your existing workspace. In an already-open browse screen,
@@ -190,6 +195,19 @@ catalog, and the picker works offline.
 Topics combine with difficulty, solve status, paid-only, and fuzzy title
 filters, including inside study plans and the daily challenge. Press `c` in
 browse to clear topic and other structured filters.
+
+### Managing test cases
+
+Press `t` in a workspace to open the test-case manager. Use `j`/`k` or arrow
+keys to select a case, `a` to add, `e`/Enter to edit, and `d` to delete with
+confirmation. The `i` shortcut still imports the last failing remote case.
+
+Enter one JSON input value per line, in the parameter order shown, and an
+optional JSON expected result. Use Tab to switch fields, Ctrl+S to save, and
+Esc to cancel. Close the manager with Esc and press `r` to run your updated
+cases. Saves preserve comments and untouched cases in `testcases.jsonl` and
+replace the file atomically. If another editor changed the file, cancel the
+edit and press `r` in the manager to reload before trying again.
 
 ### Local judge languages
 
