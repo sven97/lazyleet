@@ -72,6 +72,8 @@ type BrowseModel struct {
 	fltDiff     string
 	fltStatus   string
 	fltHidePaid bool
+	fltTags     []string
+	topicPicker *topicPicker
 	sortMode    int
 
 	filtering bool
@@ -326,6 +328,9 @@ func (m *BrowseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
+		if m.topicPicker != nil {
+			m.topicPicker.search.Width = max(1, m.width-18)
+		}
 		prevW := m.previewVP.Width
 		m.relayout()
 		m.ready = true
@@ -342,6 +347,7 @@ func (m *BrowseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case browseLoadedMsg:
 		m.loadErr = msg.err
 		m.allRows = msg.rows
+		m.refreshTopicChoices()
 		if msg.err == nil && len(msg.rows) == 0 {
 			m.statusMsg = "problem cache is empty — press s to sync"
 		}
@@ -509,6 +515,11 @@ func (m *BrowseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	}
+	if m.topicPicker != nil {
+		var cmd tea.Cmd
+		m.topicPicker.search, cmd = m.topicPicker.search.Update(msg)
+		return m, cmd
+	}
 	return m, nil
 }
 
@@ -575,7 +586,7 @@ func (m *BrowseModel) sourceRowAt(my int) int {
 }
 
 func (m *BrowseModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
-	if m.filtering || m.showHelp {
+	if m.filtering || m.showHelp || m.topicPicker != nil {
 		return m, nil
 	}
 	reg, ok := m.regionAt(msg.X, msg.Y)
@@ -646,6 +657,9 @@ func (m *BrowseModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *BrowseModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.topicPicker != nil {
+		return m.handleTopicKey(msg)
+	}
 	if m.filtering {
 		switch {
 		case key.Matches(msg, m.keys.Open):
@@ -702,6 +716,8 @@ func (m *BrowseModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.filter.Focus()
 			return m, nil
 		}
+	case key.Matches(msg, m.keys.FilterTags):
+		return m.openTopicPicker()
 	case key.Matches(msg, m.keys.FilterDiff):
 		m.fltDiff = cycleDifficulty(m.fltDiff)
 		return m.afterListChange()
@@ -721,6 +737,7 @@ func (m *BrowseModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if !m.listFilterDirty() {
 			return m, nil
 		}
+		m.fltTags = nil
 		m.fltDiff, m.fltStatus, m.fltHidePaid, m.sortMode = "", "", false, sortByID
 		return m.afterListChange()
 	}
@@ -1082,7 +1099,7 @@ func (m *BrowseModel) wheelAtEdge(msg tea.MouseMsg) bool {
 	if msg.Button != tea.MouseButtonWheelUp && msg.Button != tea.MouseButtonWheelDown {
 		return true // horizontal wheel never scrolls a vertical pane
 	}
-	if m.filtering || m.showHelp {
+	if m.filtering || m.showHelp || m.topicPicker != nil {
 		return true
 	}
 	reg, ok := m.regionAt(msg.X, msg.Y)

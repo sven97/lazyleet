@@ -18,6 +18,9 @@ func (m *BrowseModel) View() (out string) {
 	if !m.ready {
 		return "loading browse…"
 	}
+	if m.topicPicker != nil {
+		return m.topicPickerView()
+	}
 	if m.showHelp {
 		return m.renderHelp()
 	}
@@ -488,6 +491,7 @@ func (m *BrowseModel) renderHelp() string {
 		{"S", "cycle sort (# → AC%↑ → AC%↓ → difficulty)"},
 		{"c", "clear all filters + sort"},
 		{"s", "sync problem cache from LeetCode"},
+		{"t", "filter by topic tags (match all selected)"},
 		{"z", "zoom the focused pane"}, {"?", "toggle this help"}, {"q", "quit"},
 	}
 	var b strings.Builder
