@@ -107,8 +107,8 @@ func TestHistoryRecordsErrorsAndDoesNotReplaceJudgeResult(t *testing.T) {
 	m.runner = historyRunner{result: runner.Result{Passed: 1, Total: 1}}
 	msg := m.runCmd()()
 	m.Update(msg)
-	if m.lastRun == nil || !m.lastRun.OK() || !strings.Contains(m.statusMsg, "could not save attempt history") {
-		t.Fatal("save failure replaced judge success")
+	if m.lastRun == nil || !m.lastRun.OK() || !strings.Contains(m.statusMsg, "local: 1/1 passed") || !strings.Contains(m.statusMsg, "disk full") {
+		t.Fatalf("save failure hid the judge verdict: %q", m.statusMsg)
 	}
 
 	// A remote verdict already carries a status-bar summary; a subsequent
