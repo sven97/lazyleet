@@ -140,13 +140,13 @@ func (m *WorkspaceModel) handleCaseKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m *WorkspaceModel) saveCase() (tea.Model, tea.Cmd) {
 	c := m.cases
 	var in []string
-	for _, line := range strings.Split(strings.ReplaceAll(c.inputs.Value(), "\r\n", "\n"), "\n") {
+	for i, line := range strings.Split(strings.ReplaceAll(c.inputs.Value(), "\r\n", "\n"), "\n") {
 		value := strings.TrimSpace(line)
 		if value == "" {
 			continue
 		}
 		if !json.Valid([]byte(value)) {
-			c.message = fmt.Sprintf("input %d must be valid JSON", len(in)+1)
+			c.message = fmt.Sprintf("input %d must be valid JSON", i+1)
 			return m, nil
 		}
 		in = append(in, value)
@@ -186,12 +186,21 @@ func (m *WorkspaceModel) reloadCaseList(message string, invalidate bool) {
 	m.cases.cursor = min(m.cases.cursor, max(0, len(snapshot.Cases)-1))
 	m.cases.message = message
 	if invalidate {
-		m.casesRevision++
-		m.casesUnrun = true
-		m.lastRun = nil
-		m.lastErr = nil
-		m.refreshResults()
+		m.invalidateCases()
 	}
+}
+
+// invalidateCases bumps casesRevision so any in-flight run becomes stale
+// (see the staleness guard on runFinishedMsg in workspace_model.go) and
+// marks the case set as unrun. Call this any time testcases.jsonl content
+// changes on disk: add/edit/delete (via reloadCaseList's invalidate=true)
+// and case import (importFailingCase).
+func (m *WorkspaceModel) invalidateCases() {
+	m.casesRevision++
+	m.casesUnrun = true
+	m.lastRun = nil
+	m.lastErr = nil
+	m.refreshResults()
 }
 
 func (m *WorkspaceModel) caseManagerView() string {

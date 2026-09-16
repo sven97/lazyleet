@@ -360,6 +360,14 @@ func (m *WorkspaceModel) importFailingCase() (tea.Model, tea.Cmd) {
 	msg := fmt.Sprintf("imported %d case(s) → testcases.jsonl", added)
 	if added == 0 {
 		msg = "already have this case in testcases.jsonl"
+	} else {
+		// testcases.jsonl changed on disk: invalidate the same way add/edit/
+		// delete do (reloadCaseList's invalidate=true path), so an in-flight
+		// run started before this import gets discarded as stale by the
+		// runFinishedMsg guard instead of overwriting the post-import result.
+		// Must happen before startRun() below so the run it kicks off is
+		// itself stamped with the post-import revision.
+		m.invalidateCases()
 	}
 	// startRun() clears statusMsg as part of kicking off a normal run, so set
 	// ours after — it survives (runFinishedMsg doesn't touch statusMsg) and

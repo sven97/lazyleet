@@ -7,6 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/sven97/lazyleet/internal/runner"
 )
 
 func caseKey(m *WorkspaceModel, k string) {
@@ -139,5 +140,33 @@ func TestCaseEditDiscardsInFlightResults(t *testing.T) {
 	m.Update(runFinishedMsg{}) // completion from before the edit
 	if m.lastRun != nil || !m.casesUnrun || m.running {
 		t.Fatal("old run appeared current after case edit")
+	}
+}
+
+// TestCaseImportDiscardsInFlightResults mirrors TestCaseEditDiscardsInFlightResults
+// for the import path: importing a failing case must bump casesRevision just
+// like add/edit/delete do, so a runFinishedMsg from a run that was already in
+// flight before the import gets discarded as stale instead of being accepted
+// as the current (authoritative) result.
+func TestCaseImportDiscardsInFlightResults(t *testing.T) {
+	m := newTestModel(t)
+	preImportRevision := m.casesRevision
+	m.running = true // simulate a run already in flight, started before the import
+	m.remoteOut = &RemoteOutcome{LastCase: "[1,5,9]\n14"}
+	m.importFailingCase()
+	if m.casesRevision == preImportRevision {
+		t.Fatal("import did not bump casesRevision")
+	}
+	// Completion of the pre-import run: it still carries the old revision and
+	// must be discarded as stale rather than accepted as current. (Unlike the
+	// edit path, import immediately kicks off a fresh run of its own, so
+	// casesUnrun is false here — the invariant under test is that the stale
+	// result never lands in lastRun.)
+	m.Update(runFinishedMsg{casesRevision: preImportRevision, res: runner.Result{Passed: 1, Total: 1}})
+	if m.lastRun != nil {
+		t.Fatal("stale pre-import run result was accepted as current")
+	}
+	if m.statusMsg != "test cases changed · press r to run again" {
+		t.Fatalf("expected staleness status message, got %q", m.statusMsg)
 	}
 }
