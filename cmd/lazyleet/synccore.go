@@ -71,6 +71,28 @@ func fetchAndCacheProblems(ctx context.Context, client *leetcode.Client, db *sto
 	return db.ProblemCount(ctx)
 }
 
+// syncCatalogIfChanged avoids the expensive paginated catalog fetch when the
+// server's problem count already matches the local cache. It makes one cheap
+// count-only request, compares it with the cached row count, and only performs
+// the full sync when the totals differ (new/removed problems). The bool result
+// reports whether a full fetch actually ran. progress is forwarded to
+// fetchAndCacheProblems when a full sync is needed.
+func syncCatalogIfChanged(ctx context.Context, client *leetcode.Client, db *store.Store, progress func(fetched, total int)) (count int, synced bool, err error) {
+	local, err := db.ProblemCount(ctx)
+	if err != nil {
+		return 0, false, err
+	}
+	remote, err := client.TotalProblems(ctx, leetcode.ProblemFilter{})
+	if err != nil {
+		return 0, false, err
+	}
+	if local == remote {
+		return local, false, nil
+	}
+	count, err = fetchAndCacheProblems(ctx, client, db, progress)
+	return count, true, err
+}
+
 // fetchAndCacheProgress refreshes only the caller's solve status by pulling the
 // server-filtered "accepted" and "attempted" problem lists (a few pages each,
 // vs. the whole catalog) and rewriting the status column. Returns the number of

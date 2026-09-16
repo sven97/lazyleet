@@ -117,3 +117,25 @@ func (c *Client) ListAllProblems(ctx context.Context, filter ProblemFilter, onPa
 		}
 	}
 }
+
+type problemCountResp struct {
+	Wrap struct {
+		Total int `json:"total"`
+	} `json:"problemsetQuestionList"`
+}
+
+// TotalProblems returns the number of problems LeetCode currently lists for the
+// filter without fetching any question rows. It's a single cheap request used
+// to decide whether the local catalog needs a full resync: if the count matches
+// the local cache, the paginated fetch can be skipped.
+func (c *Client) TotalProblems(ctx context.Context, filter ProblemFilter) (int, error) {
+	vars := map[string]any{
+		"categorySlug": "",
+		"filters":      filter.toVars(),
+	}
+	var resp problemCountResp
+	if err := c.graphql(ctx, "problemCount", qProblemCount, vars, &resp); err != nil {
+		return 0, err
+	}
+	return resp.Wrap.Total, nil
+}
