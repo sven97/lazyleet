@@ -78,9 +78,12 @@ type WorkspaceModel struct {
 	// submission's one failing case) turned out not to work.
 	remoteRunCases []testcase.Case
 
-	watcher   *workspace.Watcher
-	statusMsg string
-	showHelp  bool
+	watcher       *workspace.Watcher
+	statusMsg     string
+	showHelp      bool
+	showHints     bool
+	hintsRevealed int
+	hints         viewport.Model
 
 	// returnToBrowse makes Back/Quit emit BackToBrowseMsg instead of tea.Quit
 	// so an owning AppModel can restore browse mode.
@@ -386,6 +389,9 @@ func (m *WorkspaceModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width, m.height = msg.Width, msg.Height
 		m.relayout()
 		m.ready = true
+		if m.showHints {
+			m.sizeHints()
+		}
 		return m, nil
 
 	case tea.KeyMsg:
@@ -457,6 +463,9 @@ func (m *WorkspaceModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *WorkspaceModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.showHints {
+		return m.handleHintsKey(msg)
+	}
 	switch {
 	case key.Matches(msg, m.keys.Quit), key.Matches(msg, m.keys.Back):
 		m.Close()
@@ -496,6 +505,8 @@ func (m *WorkspaceModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.startRemote("submit")
 	case key.Matches(msg, m.keys.Import):
 		return m.importFailingCase()
+	case key.Matches(msg, m.keys.Hints):
+		return m.openHints()
 	case key.Matches(msg, m.keys.Tests):
 		m.statusMsg = "test-case manager lands in Phase 4 — edit testcases.jsonl for now"
 		return m, nil
@@ -561,6 +572,12 @@ func (m *WorkspaceModel) paneAt(x, y int) (Pane, bool) {
 // cursor is already at the top (wheel-up) or bottom (wheel-down) of its content.
 // See WheelEdgeFilter.
 func (m *WorkspaceModel) wheelAtEdge(msg tea.MouseMsg) bool {
+	if m.showHints {
+		if msg.Button == tea.MouseButtonWheelUp {
+			return m.hints.AtTop()
+		}
+		return m.hints.AtBottom()
+	}
 	if msg.Button != tea.MouseButtonWheelUp && msg.Button != tea.MouseButtonWheelDown {
 		return true // horizontal wheel never scrolls a vertical pane
 	}
@@ -576,6 +593,11 @@ func (m *WorkspaceModel) wheelAtEdge(msg tea.MouseMsg) bool {
 }
 
 func (m *WorkspaceModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	if m.showHints {
+		var cmd tea.Cmd
+		m.hints, cmd = m.hints.Update(msg)
+		return m, cmd
+	}
 	p, ok := m.paneAt(msg.X, msg.Y)
 	if !ok {
 		return m, nil
@@ -699,6 +721,9 @@ func (m *WorkspaceModel) View() (out string) {
 	if !m.ready {
 		return "loading workspace…"
 	}
+	if m.showHints {
+		return m.hintsView()
+	}
 	if m.showHelp {
 		return m.renderHelp()
 	}
@@ -817,6 +842,7 @@ func (m *WorkspaceModel) renderHelp() string {
 		{"R", "run on LeetCode (needs `lazyleet auth`)"},
 		{"s", "submit to LeetCode (needs `lazyleet auth`)"},
 		{"i", "import the last failing case as a local test"},
+		{"h", "open hints (hidden until you reveal them)"},
 		{"b", "back"}, {"?", "toggle this help"}, {"q", "back to browse"},
 	}
 	var b strings.Builder

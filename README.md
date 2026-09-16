@@ -179,6 +179,18 @@ If the post-login refresh fails, credentials remain saved; retry with
 `lazyleet sync --progress`. The workspace lives at
 `$XDG_DATA_HOME/lazyleet/workspace/<id>-<slug>/`.
 
+### Hints
+
+Press `h` in a workspace to open hints. They start hidden: Enter or `n`
+reveals one hint at a time, `H` hides all hints, and Esc returns to the
+workspace. Use arrow keys or Page Up/Down to scroll long hints. Revealed hints
+remain visible when you reopen the panel in the same workspace; reopening the
+problem resets them to hidden.
+
+Hints are stored with problem details and work offline, including from an
+expired cache when a refresh fails. Older caches may not contain hints; use
+`lazyleet solve <slug> --refresh` while online to fetch them.
+
 ### Local judge languages
 
 | Language | Local `r` | Notes |

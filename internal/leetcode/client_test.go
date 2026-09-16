@@ -81,7 +81,7 @@ func TestQuestionDetail(t *testing.T) {
 		"exampleTestcases":"[2,7,11,15]\n9\n[3,2,4]\n6",
 		"sampleTestCase":"[2,7,11,15]\n9",
 		"metaData":"{\"name\":\"twoSum\",\"params\":[{\"name\":\"nums\",\"type\":\"integer[]\"},{\"name\":\"target\",\"type\":\"integer\"}],\"return\":{\"type\":\"integer[]\"}}",
-		"hints":["use a map"],
+		"hints":["<p>use a <code>map</code></p>", " ", "Try O(n<sup>2</sup>) first."],
 		"similarQuestions":"[]",
 		"topicTags":[{"slug":"array","name":"Array"}],
 		"codeSnippets":[{"langSlug":"python3","code":"class Solution:\n    pass"},{"langSlug":"go","code":"func twoSum() {}"}]
@@ -92,6 +92,9 @@ func TestQuestionDetail(t *testing.T) {
 	q, err := c.QuestionDetail(context.Background(), "two-sum")
 	if err != nil {
 		t.Fatalf("QuestionDetail: %v", err)
+	}
+	if len(q.Hints) != 2 || !strings.Contains(q.Hints[0], "map") || strings.Contains(q.Hints[0], "<code>") || !strings.Contains(q.Hints[1], "n²") {
+		t.Fatalf("hints missing or not converted: %q", q.Hints)
 	}
 	if q.QuestionID != 1 || q.FrontendID != 1 || q.Meta.Name != "twoSum" || q.Meta.Arity() != 2 {
 		t.Fatalf("meta wrong: %+v", q)

@@ -98,19 +98,31 @@ func (a *appContext) buildWorkspaceModel(ctx context.Context, slug, lang string,
 }
 
 // resolveQuestion returns problem detail from the first available source:
-// bundled fixture, local cache, then LeetCode (persisting the result).
+// bundled fixture (enriched with cached hints), local cache, then LeetCode.
+// A stale cached question remains available when a network refresh fails.
 func (a *appContext) resolveQuestion(ctx context.Context, slug string, refresh bool) (leetcode.Question, string, error) {
-	if q, ok := leetcode.Fixture(slug); ok && !refresh {
-		return q, "fixture", nil
-	}
-
 	db, err := a.openStore()
 	if err != nil {
+		if q, ok := leetcode.Fixture(slug); ok && !refresh {
+			return q, "fixture", nil
+		}
 		return leetcode.Question{}, "", err
 	}
 	defer db.Close()
 
+	var cached leetcode.Question
+	var haveCache bool
 	if !refresh {
+		if d, err := db.GetProblemDetail(ctx, slug, 0); err == nil {
+			row, _ := db.GetProblem(ctx, slug)
+			cached, haveCache = questionFromCache(d, row), true
+		}
+		if q, ok := leetcode.Fixture(slug); ok && !refresh {
+			if haveCache {
+				q.Hints = cached.Hints
+			}
+			return q, "fixture", nil
+		}
 		if d, err := db.GetProblemDetail(ctx, slug, a.cfg.CacheTTL.D()); err == nil {
 			row, _ := db.GetProblem(ctx, slug)
 			q := questionFromCache(d, row)
@@ -124,12 +136,18 @@ func (a *appContext) resolveQuestion(ctx context.Context, slug string, refresh b
 		}
 	}
 
-	client, err := a.newClient()
-	if err != nil {
-		return leetcode.Question{}, "", err
+	fetch := func() (leetcode.Question, error) {
+		client, err := a.newClient()
+		if err != nil {
+			return leetcode.Question{}, err
+		}
+		return client.QuestionDetail(ctx, slug)
 	}
-	q, err := client.QuestionDetail(ctx, slug)
+	q, err := fetch()
 	if err != nil {
+		if haveCache {
+			return cached, "stale cache (offline)", nil
+		}
 		return leetcode.Question{}, "", err
 	}
 	if err := db.PutProblemDetail(ctx, cacheFromQuestion(q)); err != nil {
@@ -140,6 +158,7 @@ func (a *appContext) resolveQuestion(ctx context.Context, slug string, refresh b
 
 func cacheFromQuestion(q leetcode.Question) store.ProblemDetail {
 	snips, _ := json.Marshal(q.CodeSnippets)
+	hints, _ := json.Marshal(q.Hints)
 	var exCases string
 	if len(q.ExampleCases) > 0 {
 		if b, err := json.Marshal(q.ExampleCases); err == nil {
@@ -154,6 +173,7 @@ func cacheFromQuestion(q leetcode.Question) store.ProblemDetail {
 		ExampleTestcases: q.ExampleTestcases,
 		ExampleCasesJSON: exCases,
 		CodeSnippetsJSON: string(snips),
+		HintsJSON:        string(hints),
 	}
 }
 
@@ -179,6 +199,7 @@ func questionFromCache(d store.ProblemDetail, row store.Problem) leetcode.Questi
 			q.ExampleCases = cases
 		}
 	}
+	_ = json.Unmarshal([]byte(d.HintsJSON), &q.Hints)
 	// Prefer the cached cases with scraped expected outputs, if we have them.
 	var stored []testcase.Case
 	if json.Unmarshal([]byte(orDefault(d.ExampleCasesJSON, "[]")), &stored) == nil && len(stored) > 0 {

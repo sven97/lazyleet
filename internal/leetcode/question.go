@@ -11,6 +11,7 @@ type Question struct {
 	Slug         string            // URL slug, e.g. "two-sum"
 	Title        string            // "Two Sum"
 	Difficulty   string            // Easy | Medium | Hard
+	Hints        []string          // Markdown hints, revealed only on request
 	Statement    string            // Markdown (converted from LeetCode HTML)
 	Meta         Meta              // the entry point the judge calls
 	CodeSnippets map[string]string // language slug -> starter code
