@@ -25,6 +25,18 @@ query problemsetQuestionList($categorySlug: String, $limit: Int, $skip: Int, $fi
   }
 }`
 
+const qProblemCount = `
+query problemCount($categorySlug: String, $filters: QuestionListFilterInput) {
+  problemsetQuestionList: questionList(
+    categorySlug: $categorySlug
+    limit: 1
+    skip: 0
+    filters: $filters
+  ) {
+    total: totalNum
+  }
+}`
+
 const qQuestionData = `
 query questionData($titleSlug: String!) {
   question(titleSlug: $titleSlug) {

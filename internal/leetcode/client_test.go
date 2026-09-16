@@ -74,6 +74,20 @@ func TestListProblems(t *testing.T) {
 	}
 }
 
+func TestTotalProblems(t *testing.T) {
+	const payload = `{"data":{"problemsetQuestionList":{"total":3300}}}`
+	srv := gqlServer(t, map[string]string{"problemCount": payload})
+	c := testClient(t, srv)
+
+	total, err := c.TotalProblems(context.Background(), ProblemFilter{})
+	if err != nil {
+		t.Fatalf("TotalProblems: %v", err)
+	}
+	if total != 3300 {
+		t.Fatalf("got total %d", total)
+	}
+}
+
 func TestQuestionDetail(t *testing.T) {
 	const payload = `{"data":{"question":{
 		"questionId":"1","frontendId":"1","title":"Two Sum","slug":"two-sum","difficulty":"Easy","paidOnly":false,"status":null,

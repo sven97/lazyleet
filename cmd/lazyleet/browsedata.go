@@ -98,7 +98,7 @@ func (b *browseData) Sync(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	n, err := fetchAndCacheProblems(ctx, client, b.db, nil)
+	n, _, err := syncCatalogIfChanged(ctx, client, b.db, nil)
 	if err != nil {
 		return 0, err
 	}

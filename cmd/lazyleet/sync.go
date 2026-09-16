@@ -61,14 +61,29 @@ func newSyncCmd(app *appContext) *cobra.Command {
 			}
 
 			start := time.Now()
-			count, err := fetchAndCacheProblems(ctx, client, db, func(fetched, total int) {
+			progress := func(fetched, total int) {
 				fmt.Fprintf(out, "\rfetching problem list… %d/%d", fetched, total)
-			})
+			}
+
+			var (
+				count  int
+				synced bool
+			)
+			if force {
+				count, err = fetchAndCacheProblems(ctx, client, db, progress)
+				synced = true
+			} else {
+				count, synced, err = syncCatalogIfChanged(ctx, client, db, progress)
+			}
 			fmt.Fprintln(out)
 			if err != nil {
 				return fmt.Errorf("problem list: %w", err)
 			}
-			fmt.Fprintf(out, "cached %d problems in %s\n", count, time.Since(start).Round(time.Millisecond))
+			if synced {
+				fmt.Fprintf(out, "cached %d problems in %s\n", count, time.Since(start).Round(time.Millisecond))
+			} else {
+				fmt.Fprintf(out, "problem catalog already up to date (%d problems); use --force to refresh anyway\n", count)
+			}
 
 			return syncPlans(ctx, app, db, out, prefetchPlans, force, app.fetchPlan)
 		},
