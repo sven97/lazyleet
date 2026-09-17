@@ -74,17 +74,43 @@ func TestListProblems(t *testing.T) {
 	}
 }
 
-func TestTotalProblems(t *testing.T) {
-	const payload = `{"data":{"problemsetQuestionList":{"total":3300}}}`
-	srv := gqlServer(t, map[string]string{"problemCount": payload})
+func TestCatalogHead(t *testing.T) {
+	const payload = `{"data":{"problemsetQuestionList":{"total":3300,"questions":[
+		{"frontendId":"3300","title":"Newest","slug":"newest","difficulty":"Hard","acRate":40.0,"paidOnly":false,"status":null,"topicTags":[]}
+	]}}}`
+	srv := gqlServer(t, map[string]string{"problemsetQuestionList": payload})
 	c := testClient(t, srv)
 
-	total, err := c.TotalProblems(context.Background(), ProblemFilter{})
+	total, maxID, err := c.CatalogHead(context.Background())
 	if err != nil {
-		t.Fatalf("TotalProblems: %v", err)
+		t.Fatalf("CatalogHead: %v", err)
 	}
-	if total != 3300 {
-		t.Fatalf("got total %d", total)
+	if total != 3300 || maxID != 3300 {
+		t.Fatalf("got total=%d maxID=%d", total, maxID)
+	}
+}
+
+func TestListProblemsOrderBy(t *testing.T) {
+	var gotFilters map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Variables struct {
+				Filters map[string]any `json:"filters"`
+			} `json:"variables"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		gotFilters = req.Variables.Filters
+		io.WriteString(w, `{"data":{"problemsetQuestionList":{"total":1,"questions":[]}}}`)
+	}))
+	t.Cleanup(srv.Close)
+	c := testClient(t, srv)
+
+	_, _, err := c.ListProblems(context.Background(), ProblemFilter{OrderBy: "FRONTEND_ID", SortOrder: "DESCENDING"}, 0, 1)
+	if err != nil {
+		t.Fatalf("ListProblems: %v", err)
+	}
+	if gotFilters["orderBy"] != "FRONTEND_ID" || gotFilters["sortOrder"] != "DESCENDING" {
+		t.Fatalf("filters = %#v", gotFilters)
 	}
 }
 

@@ -65,32 +65,97 @@ func fetchAndCacheProblems(ctx context.Context, client *leetcode.Client, db *sto
 			TopicTags:  s.TopicTags,
 		}
 	}
-	if err := db.UpsertProblems(ctx, rows); err != nil {
+	if err := db.ReplaceProblems(ctx, rows); err != nil {
 		return 0, err
 	}
 	return db.ProblemCount(ctx)
 }
 
 // syncCatalogIfChanged avoids the expensive paginated catalog fetch when the
-// server's problem count already matches the local cache. It makes one cheap
-// count-only request, compares it with the cached row count, and only performs
-// the full sync when the totals differ (new/removed problems). The bool result
-// reports whether a full fetch actually ran. progress is forwarded to
+// local cache is already current. It makes one cheap head request (total count
+// plus highest frontend id), and only fetches when the catalog actually moved:
+// a pure append of new problems is fetched incrementally; anything else
+// (removals, renumbering, metadata edits) falls back to a full resync. The bool
+// result reports whether any fetch ran. progress is forwarded to
 // fetchAndCacheProblems when a full sync is needed.
 func syncCatalogIfChanged(ctx context.Context, client *leetcode.Client, db *store.Store, progress func(fetched, total int)) (count int, synced bool, err error) {
 	local, err := db.ProblemCount(ctx)
 	if err != nil {
 		return 0, false, err
 	}
-	remote, err := client.TotalProblems(ctx, leetcode.ProblemFilter{})
+	localMax, err := db.MaxFrontendID(ctx)
 	if err != nil {
 		return 0, false, err
 	}
-	if local == remote {
+	remoteTotal, remoteMax, err := client.CatalogHead(ctx)
+	if err != nil {
+		return 0, false, err
+	}
+	if local == remoteTotal && localMax == remoteMax {
 		return local, false, nil
 	}
+
+	// More problems than we have and the newest id advanced: only new problems
+	// were appended, so fetch just those (1-2 requests instead of ~35).
+	if remoteTotal > local && remoteMax > localMax {
+		n, err := fetchNewProblems(ctx, client, db, localMax)
+		return n, err == nil, err
+	}
+
+	// Removals, renumbering, or in-place edits: do a full resync.
 	count, err = fetchAndCacheProblems(ctx, client, db, progress)
 	return count, true, err
+}
+
+// fetchNewProblems fetches only problems newer than maxID by paging the list in
+// descending frontend-id order until it reaches an id it already has. New
+// problems have no cached solve status to preserve, so rows are inserted with
+// the status the server reports (blank when anonymous).
+func fetchNewProblems(ctx context.Context, client *leetcode.Client, db *store.Store, maxID int) (int, error) {
+	const page = 100
+	var rows []store.Problem
+	for skip := 0; ; skip += page {
+		batch, _, err := client.ListProblems(ctx, leetcode.ProblemFilter{
+			OrderBy:   "FRONTEND_ID",
+			SortOrder: "DESCENDING",
+		}, skip, page)
+		if err != nil {
+			return 0, err
+		}
+		done := false
+		for _, s := range batch {
+			// Non-numeric ids (e.g. "LCP 01") parse to 0 and aren't part of the
+			// monotonic numeric-id tracking; skip them rather than mistaking them
+			// for the end of the new-problem range.
+			if s.FrontendID <= 0 {
+				continue
+			}
+			if s.FrontendID <= maxID {
+				done = true
+				break
+			}
+			rows = append(rows, store.Problem{
+				FrontendID: s.FrontendID,
+				Slug:       s.Slug,
+				Title:      s.Title,
+				Difficulty: s.Difficulty,
+				ACRate:     s.ACRate,
+				PaidOnly:   s.PaidOnly,
+				Status:     s.Status,
+				TopicTags:  s.TopicTags,
+			})
+		}
+		if done || len(batch) < page {
+			break
+		}
+	}
+	if len(rows) == 0 {
+		return db.ProblemCount(ctx)
+	}
+	if err := db.UpsertProblems(ctx, rows); err != nil {
+		return 0, err
+	}
+	return db.ProblemCount(ctx)
 }
 
 // fetchAndCacheProgress refreshes only the caller's solve status by pulling the

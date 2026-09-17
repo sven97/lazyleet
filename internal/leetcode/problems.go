@@ -21,6 +21,8 @@ type ProblemFilter struct {
 	Status     string   // "AC" | "NOT_STARTED" | "TRIED"
 	Tags       []string // topic tag slugs (AND-ed by LeetCode)
 	Search     string   // free-text (matches id or title)
+	OrderBy    string   // optional: "FRONTEND_ID" | "AC_RATE" | "DIFFICULTY" | "FREQUENCY"
+	SortOrder  string   // optional: "ASCENDING" | "DESCENDING"
 }
 
 func (f ProblemFilter) toVars() map[string]any {
@@ -36,6 +38,12 @@ func (f ProblemFilter) toVars() map[string]any {
 	}
 	if f.Search != "" {
 		m["searchKeywords"] = f.Search
+	}
+	if f.OrderBy != "" {
+		m["orderBy"] = f.OrderBy
+	}
+	if f.SortOrder != "" {
+		m["sortOrder"] = f.SortOrder
 	}
 	return m
 }
@@ -118,24 +126,19 @@ func (c *Client) ListAllProblems(ctx context.Context, filter ProblemFilter, onPa
 	}
 }
 
-type problemCountResp struct {
-	Wrap struct {
-		Total int `json:"total"`
-	} `json:"problemsetQuestionList"`
-}
-
-// TotalProblems returns the number of problems LeetCode currently lists for the
-// filter without fetching any question rows. It's a single cheap request used
-// to decide whether the local catalog needs a full resync: if the count matches
-// the local cache, the paginated fetch can be skipped.
-func (c *Client) TotalProblems(ctx context.Context, filter ProblemFilter) (int, error) {
-	vars := map[string]any{
-		"categorySlug": "",
-		"filters":      filter.toVars(),
+// CatalogHead snapshots the catalog's total problem count and its highest
+// frontend id in a single request by listing one problem ordered by
+// FRONTEND_ID descending. Comparing both against the local cache detects
+// newly added problems even when the total is unchanged (an add plus a
+// removal), which a count-only check misses. maxFrontendID is 0 when the
+// catalog is empty.
+func (c *Client) CatalogHead(ctx context.Context) (total, maxFrontendID int, err error) {
+	ps, total, err := c.ListProblems(ctx, ProblemFilter{OrderBy: "FRONTEND_ID", SortOrder: "DESCENDING"}, 0, 1)
+	if err != nil {
+		return 0, 0, err
 	}
-	var resp problemCountResp
-	if err := c.graphql(ctx, "problemCount", qProblemCount, vars, &resp); err != nil {
-		return 0, err
+	if len(ps) > 0 {
+		maxFrontendID = ps[0].FrontendID
 	}
-	return resp.Wrap.Total, nil
+	return total, maxFrontendID, nil
 }
