@@ -28,7 +28,9 @@ type Problem struct {
 
 // UpsertProblems writes rows in one transaction, replacing existing entries by
 // frontend_id. question_id is only overwritten when the incoming value is
-// non-zero (the list endpoint doesn't return it; detail fetches do).
+// non-zero (the list endpoint doesn't return it; detail fetches do). It does
+// not delete rows absent from the input; use ReplaceProblems for a full catalog
+// sync that prunes removed problems.
 func (s *Store) UpsertProblems(ctx context.Context, rows []Problem) error {
 	if len(rows) == 0 {
 		return nil
@@ -38,7 +40,59 @@ func (s *Store) UpsertProblems(ctx context.Context, rows []Problem) error {
 		return err
 	}
 	defer tx.Rollback()
+	if err := s.writeProblems(ctx, tx, rows); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
 
+// ReplaceProblems writes rows as the complete problem catalog: it wipes the
+// table and inserts exactly these rows, so problems LeetCode no longer lists
+// are pruned. Any previously cached internal question_id (which the list
+// endpoint never returns) is carried over onto the replacement rows.
+func (s *Store) ReplaceProblems(ctx context.Context, rows []Problem) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if len(rows) > 0 {
+		ids, err := tx.QueryContext(ctx, `SELECT frontend_id, question_id FROM problems WHERE question_id != 0`)
+		if err != nil {
+			return err
+		}
+		for ids.Next() {
+			var fid, qid int
+			if err := ids.Scan(&fid, &qid); err != nil {
+				ids.Close()
+				return err
+			}
+			for i := range rows {
+				if rows[i].FrontendID == fid && rows[i].QuestionID == 0 {
+					rows[i].QuestionID = qid
+				}
+			}
+		}
+		ids.Close()
+	}
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM problems`); err != nil {
+		return err
+	}
+	if err := s.writeProblems(ctx, tx, rows); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// writeProblems inserts (or upserts, via ON CONFLICT) rows into problems within
+// an open transaction. When the table has just been cleared, the conflict path
+// never triggers and this behaves as a plain insert.
+func (s *Store) writeProblems(ctx context.Context, tx *sql.Tx, rows []Problem) error {
+	if len(rows) == 0 {
+		return nil
+	}
 	stmt, err := tx.PrepareContext(ctx, `
 INSERT INTO problems (frontend_id, question_id, slug, title, difficulty, ac_rate, paid_only, status, topic_tags, updated_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -67,7 +121,7 @@ ON CONFLICT(frontend_id) DO UPDATE SET
 			return fmt.Errorf("upsert problem %d (%s): %w", r.FrontendID, r.Slug, err)
 		}
 	}
-	return tx.Commit()
+	return nil
 }
 
 // ProblemFilter narrows ListProblems. Zero value returns everything.
@@ -232,6 +286,21 @@ func (s *Store) ProblemCount(ctx context.Context) (int, error) {
 	var n int
 	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM problems`).Scan(&n)
 	return n, err
+}
+
+// MaxFrontendID returns the highest cached frontend id, or 0 when the cache is
+// empty. Used alongside ProblemCount to cheaply detect catalog drift: LeetCode
+// assigns monotonically increasing frontend ids, so a higher remote max means
+// new problems have been published.
+func (s *Store) MaxFrontendID(ctx context.Context) (int, error) {
+	var v sql.NullInt64
+	if err := s.db.QueryRowContext(ctx, `SELECT MAX(frontend_id) FROM problems`).Scan(&v); err != nil {
+		return 0, err
+	}
+	if !v.Valid {
+		return 0, nil
+	}
+	return int(v.Int64), nil
 }
 
 // ProblemsLastSynced returns the newest updated_at across the problem cache, or

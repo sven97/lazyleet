@@ -94,6 +94,39 @@ func TestUpsertPreservesQuestionID(t *testing.T) {
 	}
 }
 
+func TestReplaceProblemsPrunesAndPreservesQuestionID(t *testing.T) {
+	s, _ := Open(":memory:")
+	defer s.Close()
+	ctx := context.Background()
+
+	// Seed two problems, one with a known internal question_id.
+	if err := s.UpsertProblems(ctx, []Problem{
+		{FrontendID: 1, QuestionID: 42, Slug: "two-sum", Title: "Two Sum", Difficulty: "Easy"},
+		{FrontendID: 2, Slug: "old", Title: "Old", Difficulty: "Medium"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Replace with a catalog that no longer contains problem 2.
+	if err := s.ReplaceProblems(ctx, []Problem{
+		{FrontendID: 1, Slug: "two-sum", Title: "Two Sum", Difficulty: "Easy"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	n, _ := s.ProblemCount(ctx)
+	if n != 1 {
+		t.Fatalf("count = %d, want 1 (stale row not pruned)", n)
+	}
+	rows, _ := s.ListProblems(ctx, ProblemFilter{})
+	if len(rows) != 1 || rows[0].FrontendID != 1 {
+		t.Fatalf("rows = %+v", rows)
+	}
+	if rows[0].QuestionID != 42 {
+		t.Fatalf("question_id = %d, want 42 (replace wiped it)", rows[0].QuestionID)
+	}
+}
+
 func TestProblemsFresh(t *testing.T) {
 	s, _ := Open(":memory:")
 	defer s.Close()
