@@ -17,7 +17,7 @@ func TestHintsRevealOnlyOnRequest(t *testing.T) {
 	if strings.Contains(ansi.Strip(m.View()), "SECRET") {
 		t.Fatal("hints leaked into workspace")
 	}
-	pressRune(&m, 'h')
+	pressRune(&m, 'H')
 	if !m.showHints || strings.Contains(ansi.Strip(m.View()), "SECRET") {
 		t.Fatal("opening hints revealed spoilers")
 	}
@@ -33,7 +33,7 @@ func TestHintsRevealOnlyOnRequest(t *testing.T) {
 	if m.showHints || strings.Contains(ansi.Strip(m.View()), "SECRET") {
 		t.Fatal("closing hints leaked content")
 	}
-	pressRune(&m, 'h')
+	pressRune(&m, 'H')
 	pressRune(&m, 'n')
 	if !strings.Contains(ansi.Strip(m.View()), "SECOND_SECRET") || m.hintsRevealed != 2 {
 		t.Fatal("second hint missing")
@@ -54,7 +54,7 @@ func TestHintsNotYetCachedVsGenuinelyEmpty(t *testing.T) {
 	// rather than claim there are none.
 	m := newTestModel(t)
 	m.Update(tea.WindowSizeMsg{Width: 60, Height: 16})
-	pressRune(&m, 'h')
+	pressRune(&m, 'H')
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	notCachedView := ansi.Strip(m.hints.View())
 	if m.hintsRevealed != 0 || !strings.Contains(notCachedView, "--refresh") {
@@ -81,7 +81,7 @@ func TestHintsNotYetCachedVsGenuinelyEmpty(t *testing.T) {
 func TestHintsEmptyLongAndSmallViews(t *testing.T) {
 	m := newTestModel(t)
 	m.Update(tea.WindowSizeMsg{Width: 60, Height: 16})
-	pressRune(&m, 'h')
+	pressRune(&m, 'H')
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if m.hintsRevealed != 0 || !strings.Contains(ansi.Strip(m.hints.View()), "--refresh") {
 		t.Fatal("empty hints not explained")

@@ -20,6 +20,8 @@ type KeyMap struct {
 	Down     key.Binding
 	PageUp   key.Binding
 	PageDown key.Binding
+	Top      key.Binding
+	Bottom   key.Binding
 	Help     key.Binding
 	Back     key.Binding
 	Quit     key.Binding
@@ -28,14 +30,14 @@ type KeyMap struct {
 // DefaultKeyMap returns the built-in bindings.
 func DefaultKeyMap() KeyMap {
 	return KeyMap{
-		NextPane: key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "next pane")),
-		PrevPane: key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("⇧tab", "prev pane")),
+		NextPane: key.NewBinding(key.WithKeys("tab", "l", "right"), key.WithHelp("tab", "next pane")),
+		PrevPane: key.NewBinding(key.WithKeys("shift+tab", "h", "left"), key.WithHelp("⇧tab", "prev pane")),
 		Edit:     key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "edit")),
 		Run:      key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "run local")),
 		RunLC:    key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "run @LC")),
 		Submit:   key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "submit")),
 		Import:   key.NewBinding(key.WithKeys("i"), key.WithHelp("i", "import failing case")),
-		Hints:    key.NewBinding(key.WithKeys("h"), key.WithHelp("h", "hints")),
+		Hints:    key.NewBinding(key.WithKeys("H"), key.WithHelp("H", "hints")),
 		History:  key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "history")),
 		Tests:    key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "tests")),
 		Zoom:     key.NewBinding(key.WithKeys("z", "+"), key.WithHelp("z", "zoom")),
@@ -43,6 +45,8 @@ func DefaultKeyMap() KeyMap {
 		Down:     key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "down")),
 		PageUp:   key.NewBinding(key.WithKeys("pgup", "ctrl+u"), key.WithHelp("pgup", "page up")),
 		PageDown: key.NewBinding(key.WithKeys("pgdown", "ctrl+d"), key.WithHelp("pgdn", "page down")),
+		Top:      key.NewBinding(key.WithKeys("g", "home"), key.WithHelp("g", "top")),
+		Bottom:   key.NewBinding(key.WithKeys("G", "end"), key.WithHelp("G", "bottom")),
 		Help:     key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
 		Back:     key.NewBinding(key.WithKeys("b"), key.WithHelp("b", "back")),
 		Quit:     key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "back")),
@@ -57,6 +61,8 @@ type hint struct {
 
 // shortcutHints returns the bindings to show in the status bar for the current
 // context, in order. RunLC/Submit are shown but marked pending (Phase 6).
+// Back is intentionally omitted: it's a hidden alias of Quit (both leave the
+// workspace), so showing both just clutters the bar.
 func (k KeyMap) shortcutHints() []hint {
 	return []hint{
 		{k.Edit.Help().Key, k.Edit.Help().Desc},
@@ -70,7 +76,6 @@ func (k KeyMap) shortcutHints() []hint {
 		{k.NextPane.Help().Key, k.NextPane.Help().Desc},
 		{k.Zoom.Help().Key, k.Zoom.Help().Desc},
 		{k.Help.Help().Key, k.Help.Help().Desc},
-		{k.Back.Help().Key, k.Back.Help().Desc},
 		{k.Quit.Help().Key, k.Quit.Help().Desc},
 	}
 }
