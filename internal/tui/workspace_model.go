@@ -646,6 +646,12 @@ func (m *WorkspaceModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.PageDown):
 		m.focusedViewport().PageDown()
 		return m, nil
+	case key.Matches(msg, m.keys.Top):
+		m.focusedViewport().GotoTop()
+		return m, nil
+	case key.Matches(msg, m.keys.Bottom):
+		m.focusedViewport().GotoBottom()
+		return m, nil
 	}
 	return m, nil
 }
@@ -987,7 +993,8 @@ func (m *WorkspaceModel) renderHelp() string {
 	pairs := [][2]string{
 		{"↑/k ↓/j", "scroll the focused pane"},
 		{"ctrl+u / ctrl+d", "page up / down"},
-		{"tab / ⇧tab", "next / prev pane"},
+		{"g / G", "jump to top / bottom"},
+		{"tab / ⇧tab", "next / prev pane (h / l also work)"},
 		{"z", "zoom the focused pane"},
 		{"e", "edit in $EDITOR"},
 		{"r", "run local tests"},
@@ -995,9 +1002,9 @@ func (m *WorkspaceModel) renderHelp() string {
 		{"s", "submit to LeetCode (needs `lazyleet auth`)"},
 		{"i", "import the last failing case as a local test"},
 		{"t", "manage test cases (add, edit, delete)"},
-		{"h", "open hints (hidden until you reveal them)"},
+		{"H", "open hints (hidden until you reveal them)"},
 		{"a", "recent local and remote attempt history"},
-		{"b", "back"}, {"?", "toggle this help"}, {"q", "back to browse"},
+		{"q", "back to browse (b also works)"}, {"?", "toggle this help"},
 	}
 	var b strings.Builder
 	b.WriteString(m.th.TitleFocused.Render("lazyleet — workspace") + "\n\n")

@@ -62,7 +62,7 @@ func (m *WorkspaceModel) refreshHints() {
 
 func (m *WorkspaceModel) handleHintsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "esc", "h", "q", "b":
+	case "esc", "q", "b":
 		m.showHints = false
 		return m, nil
 	case "enter", "n":
