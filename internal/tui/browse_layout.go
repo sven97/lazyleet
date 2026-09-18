@@ -30,6 +30,21 @@ func (r Region) String() string {
 func (r Region) next() Region { return (r + 1) % regionCount }
 func (r Region) prev() Region { return (r + regionCount - 1) % regionCount }
 
+// Number is the pane's 1-based digit-key/border-title number: RegionStatus=1
+// … RegionDetail=4. 0 is deliberately unused — unlike lazygit, there's no
+// generic "main" panel distinct from the numbered side stack here, so every
+// browse pane is an equally valid numbered target.
+func (r Region) Number() int { return int(r) + 1 }
+
+// regionForNumber is Number's inverse: the region a pressed digit jumps to,
+// or ok=false if n isn't a valid pane number in browse mode.
+func regionForNumber(n int) (r Region, ok bool) {
+	if n < 1 || n > int(regionCount) {
+		return 0, false
+	}
+	return Region(n - 1), true
+}
+
 // BrowseLayout is the solved geometry for browse mode.
 type BrowseLayout struct {
 	Status  Rect // left column, top — auth / cache summary
@@ -59,11 +74,14 @@ func (l BrowseLayout) RectFor(r Region) Rect {
 }
 
 const (
-	brLeftPct     = 38 // left column width, % of terminal width
-	brLeftMin     = 28
-	brLeftMax     = 56
-	brRightMin    = 30
-	brStatusH     = 6 // border(2) + title(1) + 3 body lines (auth · cache · daily)
+	brLeftPct  = 38 // left column width, % of terminal width
+	brLeftMin  = 28
+	brLeftMax  = 56
+	brRightMin = 30
+	brStatusH  = 6 // border(2) + 3 body lines (auth · cache · daily) + 1 spare row
+	// (the title used to eat its own row above the body; F2 moved it into the
+	// top border, see numberedFrame in frame.go — brStatusH is left as-is so
+	// this pane keeps its existing size rather than shrinking by one row)
 	brSourcesMaxH = 14
 	brListMinH    = 5
 	brMinTwoColW  = brLeftMin + brRightMin + 2
@@ -108,10 +126,10 @@ func ComputeBrowse(termW, termH int, focused Region, zoom bool, sourcesRows int)
 	}
 	rightW := termW - leftW
 
-	const srcMinH = 6 // title + border + at least 3 body lines
+	const srcMinH = 6 // border + at least 3 body lines, plus a spare row (see brStatusH)
 
 	statusH := brStatusH
-	srcH := sourcesRows + 3 // + title + border
+	srcH := sourcesRows + 3 // + border, plus a spare row (see brStatusH)
 	if srcH > brSourcesMaxH {
 		srcH = brSourcesMaxH
 	}

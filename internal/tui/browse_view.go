@@ -28,17 +28,14 @@ func (m *BrowseModel) View() (out string) {
 	var body string
 	if m.layout.Single {
 		r := m.layout.RectFor(m.focus)
-		body = m.frame(m.regionTitle(m.focus), true, r, m.regionBody(m.focus, innerW(r)))
+		body = m.frame(m.focus, r, m.regionBody(m.focus, innerW(r)))
 	} else {
 		left := lipgloss.JoinVertical(lipgloss.Left,
-			m.frame("Status", m.focus == RegionStatus, m.layout.Status,
-				m.statusPaneBody(innerW(m.layout.Status))),
-			m.frame("Sources", m.focus == RegionSources, m.layout.Sources,
-				m.sourcesBody(innerW(m.layout.Sources))),
-			m.frame(m.listTitle(), m.focus == RegionList, m.layout.List,
-				m.listBody(innerW(m.layout.List))),
+			m.frame(RegionStatus, m.layout.Status, m.statusPaneBody(innerW(m.layout.Status))),
+			m.frame(RegionSources, m.layout.Sources, m.sourcesBody(innerW(m.layout.Sources))),
+			m.frame(RegionList, m.layout.List, m.listBody(innerW(m.layout.List))),
 		)
-		right := m.frame(m.regionTitle(RegionDetail), m.focus == RegionDetail, m.layout.Detail, m.detailBody())
+		right := m.frame(RegionDetail, m.layout.Detail, m.detailBody())
 		body = lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 	}
 	return lipgloss.JoinVertical(lipgloss.Left, body, m.renderStatusBar())
@@ -71,21 +68,19 @@ func (m *BrowseModel) regionBody(r Region, w int) string {
 	}
 }
 
-// frame draws a bordered pane with a title row.
-func (m *BrowseModel) frame(title string, focused bool, r Rect, body string) string {
+// frame draws a bordered pane for region r, its number and title embedded in
+// the top border (see numberedFrame in frame.go) rather than on a separate
+// line inside it.
+func (m *BrowseModel) frame(region Region, r Rect, body string) string {
 	if r.Empty() {
 		return ""
 	}
 	ts := m.th.Title
 	bs := m.th.PaneBorder
-	if focused {
+	if m.focus == region {
 		ts, bs = m.th.TitleFocused, m.th.PaneBorderFocused
 	}
-	inner := lipgloss.JoinVertical(lipgloss.Left, ts.Render(title), body)
-	// MaxWidth/MaxHeight hard-clip: a body that renders taller than its pane
-	// must never push the neighbouring panes off-screen.
-	return bs.Width(r.W - 2).Height(r.H - 2).
-		MaxWidth(r.W).MaxHeight(r.H).Render(inner)
+	return numberedFrame(bs, ts, region.Number(), ts.Render(m.regionTitle(region)), r, body)
 }
 
 func (m *BrowseModel) sourcesBody(w int) string {
@@ -120,7 +115,9 @@ func (m *BrowseModel) sourcesBody(w int) string {
 const staleSyncAfter = 24 * time.Hour
 
 // statusPaneBody is the compact 3-line summary shown in the small left-top pane
-// (its rect is brStatusH tall: border + title + 3 body lines).
+// (its rect is brStatusH tall: border(2) + 3 body lines, plus one spare row —
+// the title used to be its own line but now lives in the top border, see
+// numberedFrame in frame.go).
 func (m *BrowseModel) statusPaneBody(w int) string {
 	// The region is almost always the "com" default, so it's only worth the
 	// space when it isn't — same rule statusDetailBody uses.
@@ -483,6 +480,7 @@ func (m *BrowseModel) renderHelp() string {
 	pairs := [][2]string{
 		{"↑/k ↓/j", "move"}, {"g / G", "top / bottom"}, {"ctrl+u / ctrl+d", "page"},
 		{"tab / ⇧tab", "cycle panes"}, {"h / l", "prev / next pane"},
+		{"1-4", "jump straight to Status / Sources / Problems / Detail"},
 		{"enter", "open workspace (or apply a source)"},
 		{"/", "fuzzy filter"}, {"esc", "clear fuzzy filter / close help"},
 		{"d", "cycle difficulty filter (Easy → Medium → Hard → all)"},

@@ -1,6 +1,24 @@
 package tui
 
-import "github.com/charmbracelet/bubbles/key"
+import (
+	"github.com/charmbracelet/bubbles/key"
+	tea "github.com/charmbracelet/bubbletea"
+)
+
+// digitKey reports the bare digit 1-9 a keypress represents, if any — used
+// by both modes' F2 "jump straight to pane N" dispatch (see the digit block
+// near the end of handleKey in both browse_model.go and workspace_model.go).
+// Neither KeyMap nor BrowseKeyMap binds a bare digit to anything else, so
+// there's no collision to worry about; digit-jump keys are deliberately kept
+// out of both maps (and the shortcut bar) since they're documented in the
+// `?` help overlay instead, not the always-visible hints.
+func digitKey(msg tea.KeyMsg) (int, bool) {
+	s := msg.String()
+	if len(s) != 1 || s[0] < '1' || s[0] > '9' {
+		return 0, false
+	}
+	return int(s[0] - '0'), true
+}
 
 // KeyMap is the workspace keymap. Bindings map to semantic actions; the same
 // definitions feed dispatch and the generated shortcut bar (cf. lazygit).
