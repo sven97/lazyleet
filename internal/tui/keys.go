@@ -77,23 +77,33 @@ type hint struct {
 	desc string
 }
 
-// shortcutHints returns the bindings to show in the status bar for the current
-// context, in order. RunLC/Submit are shown but marked pending (Phase 6).
-// Back is intentionally omitted: it's a hidden alias of Quit (both leave the
-// workspace), so showing both just clutters the bar.
-func (k KeyMap) shortcutHints() []hint {
-	return []hint{
-		{k.Edit.Help().Key, k.Edit.Help().Desc},
-		{k.Run.Help().Key, k.Run.Help().Desc},
-		{k.RunLC.Help().Key, k.RunLC.Help().Desc},
-		{k.Submit.Help().Key, k.Submit.Help().Desc},
-		{k.Import.Help().Key, "import"}, // full desc ("import failing case") is in `?` help
-		{k.Tests.Help().Key, k.Tests.Help().Desc},
-		{k.Hints.Help().Key, k.Hints.Help().Desc},
-		{k.History.Help().Key, k.History.Help().Desc},
-		{k.NextPane.Help().Key, k.NextPane.Help().Desc},
-		{k.Zoom.Help().Key, k.Zoom.Help().Desc},
-		{k.Help.Help().Key, k.Help.Help().Desc},
-		{k.Quit.Help().Key, k.Quit.Help().Desc},
+// shortcutHints returns the bindings to show in the status bar for the
+// currently focused pane: at most 3 context-specific hints (the ones judged
+// most-used for that pane, cf. lazygit's context-dependent bottom bar), plus
+// a trailing, always-present `?` help hint so full reference is never more
+// than one keypress away. The `?` help overlay documents every binding in
+// full — this bar deliberately shows only the hottest few.
+func (k KeyMap) shortcutHints(focus Pane) []hint {
+	var hints []hint
+	switch focus {
+	case PaneStatement:
+		hints = []hint{
+			{k.Edit.Help().Key, k.Edit.Help().Desc},
+			{k.Hints.Help().Key, k.Hints.Help().Desc},
+			{k.Zoom.Help().Key, k.Zoom.Help().Desc},
+		}
+	case PaneCode:
+		hints = []hint{
+			{k.Edit.Help().Key, k.Edit.Help().Desc},
+			{k.Run.Help().Key, k.Run.Help().Desc},
+			{k.RunLC.Help().Key, k.RunLC.Help().Desc},
+		}
+	case PaneResults:
+		hints = []hint{
+			{k.Submit.Help().Key, k.Submit.Help().Desc},
+			{k.Import.Help().Key, "import"}, // full desc ("import failing case") is in `?` help
+			{k.History.Help().Key, k.History.Help().Desc},
+		}
 	}
+	return append(hints, hint{k.Help.Help().Key, k.Help.Help().Desc})
 }

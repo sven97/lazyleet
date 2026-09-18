@@ -119,14 +119,21 @@ func TestWorkspaceHelpTogglesAndCloses(t *testing.T) {
 	}
 }
 
+// TestWorkspaceStatusBarAdvertisesImport confirms the import shortcut still
+// shows in the status bar — but only in the context where it's actually
+// relevant (Results, cf. shortcutHints in keys.go), now that the bar is
+// context-sensitive (F3) instead of always listing every binding. Full
+// documentation regardless of focus lives in `?` help (see the help test
+// above).
 func TestWorkspaceStatusBarAdvertisesImport(t *testing.T) {
 	m := newTestModel(t)
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 140, Height: 40})
 	m = updated.(*WorkspaceModel)
 
+	m.focused = PaneResults
 	bar := m.renderStatusBar()
 	if !strings.Contains(bar, "import") {
-		t.Errorf("status bar should advertise the import shortcut:\n%s", bar)
+		t.Errorf("status bar should advertise the import shortcut when Results is focused:\n%s", bar)
 	}
 }
 

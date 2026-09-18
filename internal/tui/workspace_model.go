@@ -1014,7 +1014,7 @@ func (m *WorkspaceModel) renderStatusBar() string {
 	}
 
 	var segs []string
-	for _, h := range m.keys.shortcutHints() {
+	for _, h := range m.keys.shortcutHints(m.focused) {
 		segs = append(segs, m.th.StatusKey.Render(h.key)+m.th.StatusBar.Render(" "+h.desc))
 	}
 	hints := strings.Join(segs, m.th.StatusDivider.Render(" │ "))
