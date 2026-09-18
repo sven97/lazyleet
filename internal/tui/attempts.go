@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -14,6 +15,15 @@ import (
 	"github.com/sven97/lazyleet/internal/runner"
 )
 
+// maxHistoryEntries caps the merged (local + remote) list shown in the
+// history panel, matching the "Latest 50" footer text.
+const maxHistoryEntries = 50
+
+// remoteHistoryLimit is how many of LeetCode's own submissions to fetch per
+// history-panel open. Kept small: it's a live network call gated behind an
+// already-open panel, not a background sync.
+const remoteHistoryLimit = 20
+
 type historyLoadedMsg struct {
 	slug       string
 	generation int
@@ -22,6 +32,10 @@ type historyLoadedMsg struct {
 }
 
 func (m *WorkspaceModel) SetHistory(repo attempt.Repository) { m.history = repo }
+
+// SetRemoteHistory attaches a source for LeetCode's own submission history,
+// folded into the local attempt log's history panel (see mergeRemoteHistory).
+func (m *WorkspaceModel) SetRemoteHistory(rh RemoteHistory) { m.remoteHistory = rh }
 
 func recordAttempt(repo attempt.Repository, e attempt.Entry) error {
 	if repo == nil {
@@ -109,7 +123,7 @@ func remoteAttempt(slug, lang, kind string, started time.Time, out RemoteOutcome
 }
 
 func (m *WorkspaceModel) loadHistory() tea.Cmd {
-	repo, slug := m.history, m.ws.Slug
+	repo, remote, slug := m.history, m.remoteHistory, m.ws.Slug
 	m.historyGeneration++
 	generation := m.historyGeneration
 	m.historyLoading = true
@@ -118,10 +132,55 @@ func (m *WorkspaceModel) loadHistory() tea.Cmd {
 			return historyLoadedMsg{slug: slug, generation: generation, err: fmt.Errorf("attempt history is unavailable")}
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		entries, err := repo.RecentAttempts(ctx, slug, 50)
-		return historyLoadedMsg{slug: slug, generation: generation, entries: entries, err: err}
+		entries, err := repo.RecentAttempts(ctx, slug, maxHistoryEntries)
+		cancel()
+		if err != nil {
+			return historyLoadedMsg{slug: slug, generation: generation, err: err}
+		}
+		entries = mergeRemoteHistory(remote, entries)
+		return historyLoadedMsg{slug: slug, generation: generation, entries: entries}
 	}
+}
+
+// mergeRemoteHistory folds LeetCode's own submission history for the problem
+// into entries (lazyleet's local record), newest first, capped to
+// maxHistoryEntries. A submission made via lazyleet's own 's' key is already
+// recorded locally (with more detail — a diff-ready exp/got, to-the-second
+// timestamp) under the same RemoteID, so remote rows that collide with a
+// local RemoteID are dropped rather than shown twice.
+//
+// This is best-effort and silent on failure: a nil remote, an unavailable
+// one (not authenticated), or a fetch error (e.g. an expired session, or a
+// LeetCode schema drift — see the verification note on Client.SubmissionList)
+// just means the merged list stays local-only, which already stands on its
+// own as a history panel.
+func mergeRemoteHistory(remote RemoteHistory, entries []attempt.Entry) []attempt.Entry {
+	if remote == nil || !remote.Available() {
+		return entries
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	fetched, err := remote.Submissions(ctx, remoteHistoryLimit)
+	if err != nil || len(fetched) == 0 {
+		return entries
+	}
+	seen := make(map[string]bool, len(entries))
+	for _, e := range entries {
+		if e.RemoteID != "" {
+			seen[e.RemoteID] = true
+		}
+	}
+	for _, e := range fetched {
+		if e.RemoteID != "" && seen[e.RemoteID] {
+			continue
+		}
+		entries = append(entries, e)
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].CreatedAt.After(entries[j].CreatedAt) })
+	if len(entries) > maxHistoryEntries {
+		entries = entries[:maxHistoryEntries]
+	}
+	return entries
 }
 
 func (m *WorkspaceModel) handleHistoryKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {

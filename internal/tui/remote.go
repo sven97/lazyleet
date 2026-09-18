@@ -1,6 +1,10 @@
 package tui
 
-import "context"
+import (
+	"context"
+
+	"github.com/sven97/lazyleet/internal/attempt"
+)
 
 // RemoteOutcome is the result of running or submitting against LeetCode's judge,
 // mapped out of the leetcode package so tui stays transport-agnostic.
@@ -39,4 +43,16 @@ type RemoteJudge interface {
 	Run(ctx context.Context, code, dataInput string) (RemoteOutcome, error)
 	// Submit submits code for full judging, polling to completion.
 	Submit(ctx context.Context, code string) (RemoteOutcome, error)
+}
+
+// RemoteHistory fetches the signed-in user's own submission history for the
+// current problem straight from LeetCode, mapped into attempt.Entry so the
+// workspace history panel (attempt.Repository) can fold it in as read-only
+// context. It is never written back to the local store — attempt.Entry is
+// reused here purely as a shared display shape, not a persistence contract.
+// A nil RemoteHistory (or one whose Available reports false) just means the
+// panel stays local-only.
+type RemoteHistory interface {
+	Available() bool
+	Submissions(ctx context.Context, limit int) ([]attempt.Entry, error)
 }

@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -47,6 +48,17 @@ type historyRunner struct {
 func (r historyRunner) Available() bool { return true }
 func (r historyRunner) Run(context.Context, runner.Spec) (runner.Result, error) {
 	return r.result, r.err
+}
+
+type remoteHistoryFake struct {
+	available bool
+	entries   []attempt.Entry
+	err       error
+}
+
+func (r remoteHistoryFake) Available() bool { return r.available }
+func (r remoteHistoryFake) Submissions(context.Context, int) ([]attempt.Entry, error) {
+	return r.entries, r.err
 }
 
 type historyRemote struct{ err error }
@@ -176,6 +188,71 @@ func TestHistoryViewNavigationEmptyFailureAndLongDetails(t *testing.T) {
 	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	if m.showHistory {
 		t.Fatal("history did not close")
+	}
+}
+
+func TestMergeRemoteHistoryDedupsAndSorts(t *testing.T) {
+	local := []attempt.Entry{
+		{Slug: "two-sum", Kind: "submit", Verdict: "Accepted", RemoteID: "222", CreatedAt: time.Unix(2000, 0)},
+	}
+	remote := remoteHistoryFake{available: true, entries: []attempt.Entry{
+		{Slug: "two-sum", Kind: "remote", Verdict: "Accepted", RemoteID: "222", CreatedAt: time.Unix(2000, 0)}, // dup, must be dropped
+		{Slug: "two-sum", Kind: "remote", Verdict: "Wrong Answer", RemoteID: "111", CreatedAt: time.Unix(1000, 0)},
+		{Slug: "two-sum", Kind: "remote", Verdict: "Accepted", RemoteID: "333", CreatedAt: time.Unix(3000, 0)},
+	}}
+	got := mergeRemoteHistory(remote, local)
+	if len(got) != 3 {
+		t.Fatalf("want 3 entries after dedup, got %d: %+v", len(got), got)
+	}
+	if got[0].RemoteID != "333" || got[1].RemoteID != "222" || got[2].RemoteID != "111" {
+		t.Fatalf("not sorted newest-first: %+v", got)
+	}
+}
+
+func TestMergeRemoteHistoryIgnoresUnavailableOrFailingRemote(t *testing.T) {
+	local := []attempt.Entry{{Slug: "two-sum", Kind: "local", RemoteID: "1", CreatedAt: time.Unix(1, 0)}}
+
+	if got := mergeRemoteHistory(nil, local); len(got) != 1 {
+		t.Fatalf("nil remote should pass local through unchanged, got %+v", got)
+	}
+	if got := mergeRemoteHistory(remoteHistoryFake{available: false}, local); len(got) != 1 {
+		t.Fatalf("unavailable remote should pass local through unchanged, got %+v", got)
+	}
+	if got := mergeRemoteHistory(remoteHistoryFake{available: true, err: errors.New("expired session")}, local); len(got) != 1 {
+		t.Fatalf("remote error should pass local through unchanged, got %+v", got)
+	}
+}
+
+func TestMergeRemoteHistoryCapsAtMax(t *testing.T) {
+	var local []attempt.Entry
+	var remoteEntries []attempt.Entry
+	for i := 0; i < maxHistoryEntries+10; i++ {
+		remoteEntries = append(remoteEntries, attempt.Entry{Slug: "two-sum", Kind: "remote", RemoteID: fmt.Sprint(i), CreatedAt: time.Unix(int64(i), 0)})
+	}
+	got := mergeRemoteHistory(remoteHistoryFake{available: true, entries: remoteEntries}, local)
+	if len(got) != maxHistoryEntries {
+		t.Fatalf("want capped at %d, got %d", maxHistoryEntries, len(got))
+	}
+	// newest first: the highest timestamps should survive the cap.
+	if got[0].RemoteID != fmt.Sprint(len(remoteEntries)-1) {
+		t.Fatalf("cap kept the wrong end of the list: %+v", got[0])
+	}
+}
+
+func TestLoadHistoryMergesRemoteSubmissions(t *testing.T) {
+	m := newTestModel(t)
+	repo := &memoryHistory{entries: []attempt.Entry{{Slug: "two-sum", Kind: "submit", RemoteID: "1", CreatedAt: time.Unix(1, 0)}}}
+	m.SetHistory(repo)
+	m.SetRemoteHistory(remoteHistoryFake{available: true, entries: []attempt.Entry{
+		{Slug: "two-sum", Kind: "remote", RemoteID: "2", Verdict: "Accepted", CreatedAt: time.Unix(2, 0)},
+	}})
+	msg := m.loadHistory()()
+	loaded, ok := msg.(historyLoadedMsg)
+	if !ok || loaded.err != nil {
+		t.Fatalf("loadHistory failed: %+v", msg)
+	}
+	if len(loaded.entries) != 2 || loaded.entries[0].RemoteID != "2" {
+		t.Fatalf("remote submission not merged in: %+v", loaded.entries)
 	}
 }
 
