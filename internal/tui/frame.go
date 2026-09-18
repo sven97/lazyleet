@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // This file holds the shared bordered-pane renderer both BrowseModel.frame
@@ -99,8 +100,13 @@ func lineStyle(border lipgloss.Style, top bool) lipgloss.Style {
 }
 
 // fillWidth repeats bar enough times to cover exactly cells terminal
-// columns, hard-clipping (ANSI/grapheme-safe, via truncate) rather than
-// relying on len() or assuming bar is a single byte.
+// columns, hard-clipping (ANSI/grapheme-safe) rather than relying on len() or
+// assuming bar is a single byte. This must NOT go through truncate/ansi.Truncate
+// with its "…" tail: that tail is for cutting user-facing text, and since this
+// helper always over-generates the repeated string on purpose (so it can then
+// be clipped to an exact width), truncate's ellipsis would fire on every call
+// — replacing part of every border fill with a stray "…" instead of the
+// border's own glyph. Clip with an empty tail instead.
 func fillWidth(bar string, cells int) string {
 	if cells <= 0 {
 		return ""
@@ -109,7 +115,7 @@ func fillWidth(bar string, cells int) string {
 	if bw < 1 {
 		bw = 1
 	}
-	return truncate(strings.Repeat(bar, cells/bw+1), cells)
+	return ansi.Truncate(strings.Repeat(bar, cells/bw+1), cells, "")
 }
 
 // borderContentRow wraps pre-styled content into a border row: corner,

@@ -50,6 +50,37 @@ func TestNumberedFrameEmbedsNumberAndTitleInTopBorder(t *testing.T) {
 	}
 }
 
+// TestFillWidthNeverInsertsEllipsis guards against a regression where
+// fillWidth routed its over-generated repeat string through the ellipsis-tail
+// truncate() helper: since fillWidth always over-generates on purpose (so it
+// can clip down to an exact width), that path fired on every call and left a
+// stray "…" in place of the border glyph on every pane's top/bottom border.
+func TestFillWidthNeverInsertsEllipsis(t *testing.T) {
+	for _, cells := range []int{0, 1, 2, 3, 7, 20, 21, 63} {
+		got := fillWidth("─", cells)
+		if strings.Contains(got, "…") {
+			t.Errorf("fillWidth(%q, %d) = %q contains a stray ellipsis", "─", cells, got)
+		}
+		if w := lipgloss.Width(got); w != cells {
+			t.Errorf("fillWidth(%q, %d) width = %d, want %d", "─", cells, w, cells)
+		}
+	}
+}
+
+func TestNumberedFrameBordersHaveNoStrayEllipsis(t *testing.T) {
+	th := DefaultTheme()
+	r := Rect{W: 24, H: 6}
+	got := numberedFrame(th.PaneBorder, th.Title, 1, th.Title.Render("Status"), r, "line1\nline2")
+	lines := strings.Split(got, "\n")
+	top, bottom := lines[0], lines[len(lines)-1]
+	if strings.Contains(top, "…") {
+		t.Errorf("top border contains a stray ellipsis: %q", top)
+	}
+	if strings.Contains(bottom, "…") {
+		t.Errorf("bottom border contains a stray ellipsis: %q", bottom)
+	}
+}
+
 func TestNumberedFrameNeverExceedsItsRect(t *testing.T) {
 	th := DefaultTheme()
 	longTitle := strings.Repeat("Very Long Problem Title ", 5)
