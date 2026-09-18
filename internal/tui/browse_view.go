@@ -188,16 +188,114 @@ func (m *BrowseModel) dailyStatusLine(w int) string {
 	return mark + " " + m.th.Muted.Render(truncate(txt, w-2))
 }
 
+// lazyleetArt is the pixel-style "lazyleet" wordmark shown at the top of the
+// expanded Status/About panel (Detail pane, RegionStatus focused), in the
+// spirit of lazygit's own About screen. Plain ASCII, no external asset — see
+// statusHeaderBlock for the narrow-pane fallback.
+const lazyleetArt = `#     ##  #### #  # #    #### #### ####
+#    #  #    # #  # #    #    #     #
+#    ####   #   ##  #    ###  ###   #
+#    #  #  #     #  #    #    #     #
+#### #  # ####   #  #### #### ####  #`
+
+// lazyleetArtWidth is lazyleetArt's rendered width in terminal columns,
+// computed from the art itself so a future tweak to the glyphs can't
+// silently desync statusHeaderBlock's narrow-pane fallback threshold.
+var lazyleetArtWidth = asciiArtWidth(lazyleetArt)
+
+// asciiArtWidth returns a (possibly multi-line) ASCII-art string's widest
+// line, in display columns.
+func asciiArtWidth(art string) int {
+	w := 0
+	for _, line := range strings.Split(art, "\n") {
+		if lw := lipgloss.Width(line); lw > w {
+			w = lw
+		}
+	}
+	return w
+}
+
+// lazyleetRepoURL and friends are the reference links shown in the
+// Status/About panel — only ones that actually resolve for this repo.
+const (
+	lazyleetRepoURL     = "https://github.com/sven97/lazyleet"
+	lazyleetIssuesURL   = lazyleetRepoURL + "/issues"
+	lazyleetReleasesURL = lazyleetRepoURL + "/releases"
+)
+
 // statusDetailBody is the expanded info shown in the Detail pane while the
-// Status pane is focused: who you are, how fresh the two caches are (the full
-// problem catalog and your own solve status), and today's daily challenge.
-func (m *BrowseModel) statusDetailBody() string {
+// Status pane is focused: a wordmark header + version + reference links,
+// then who you are, how fresh the two caches are (the full problem catalog
+// and your own solve status), and today's daily challenge. w is the Detail
+// pane's inner (post-border) width, used only to decide whether the ASCII-art
+// header fits.
+func (m *BrowseModel) statusDetailBody(w int) string {
+	var b strings.Builder
+	b.WriteString(m.statusHeaderBlock(w))
+	b.WriteString(m.statusDivider(w))
+	b.WriteString(m.statusLiveBlock())
+	return b.String()
+}
+
+// statusHeaderBlock renders the wordmark (or its narrow-pane fallback),
+// version line, and reference links block.
+func (m *BrowseModel) statusHeaderBlock(w int) string {
+	th := m.th
+	var b strings.Builder
+
+	if w >= lazyleetArtWidth {
+		// Style each line individually rather than the whole multi-line block:
+		// lipgloss.Style.Render pads every line of a styled multi-line string
+		// out to the widest line (its horizontal-align pass), which would
+		// otherwise inflate the art with trailing spaces it wasn't drawn with.
+		for _, line := range strings.Split(lazyleetArt, "\n") {
+			b.WriteString(th.Title.Render(line) + "\n")
+		}
+	} else {
+		// Too narrow for the art to render legibly — a plain bold wordmark
+		// line still identifies the panel.
+		b.WriteString(th.Title.Render("lazyleet") + "\n")
+	}
+	if m.version != "" {
+		b.WriteString(th.Muted.Render(m.version) + "\n")
+	}
+
+	b.WriteString("\n")
+	link := th.Muted.Underline(true)
+	// TODO(F1): once internal/tui/render.go grows hyperlink(display, url)
+	// (OSC 8), wrap each of these three lines with it so they become
+	// Cmd/Ctrl-clickable in supporting terminals.
+	b.WriteString(link.Render("repo      "+lazyleetRepoURL) + "\n")
+	b.WriteString(link.Render("issues    "+lazyleetIssuesURL) + "\n")
+	b.WriteString(link.Render("releases  "+lazyleetReleasesURL) + "\n")
+
+	return b.String()
+}
+
+// statusDivider is the subtle rule separating the header/links block above
+// from the live Account/Catalog/Progress/Daily sections below.
+func (m *BrowseModel) statusDivider(w int) string {
+	n := w
+	if n < 8 {
+		n = 8
+	}
+	if n > 60 {
+		n = 60
+	}
+	return m.th.Muted.Render(strings.Repeat("─", n)) + "\n"
+}
+
+// statusLiveBlock renders the Account/Catalog/Progress/Daily sections — same
+// data and edge cases (anonymous/unsynced/stale/loading/error) as before this
+// panel's visual reorganization, just grouped under statusDetailBody's new
+// header instead of starting the pane.
+func (m *BrowseModel) statusLiveBlock() string {
 	th := m.th
 	var b strings.Builder
 	row := func(k, v string) { b.WriteString("  " + fmt.Sprintf("%-11s", k) + v + "\n") }
 	section := func(name string) { b.WriteString("\n" + th.Title.Render(name) + "\n") }
 
-	b.WriteString(th.Title.Render("Account") + "\n")
+	section("Account")
 	switch {
 	case !m.auth.Authed:
 		row("user", th.Muted.Render("anonymous — run `lazyleet auth`"))
