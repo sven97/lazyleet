@@ -46,6 +46,15 @@ type WorkspaceModel struct {
 	code      viewport.Model
 	results   viewport.Model
 
+	// sel is an in-progress or just-finished click-drag text selection (F1)
+	// over whichever of Statement/Code/Results it started in (selPane) — see
+	// selection.go. hintsSel is the analogous state for the Hints overlay
+	// (hints.go), kept separate since it isn't one of the three numbered
+	// panes and has its own (border-less) screen geometry.
+	sel      selectionState
+	selPane  Pane
+	hintsSel selectionState
+
 	stmtRenderer *glamour.TermRenderer
 	stmtWidth    int
 	stmtImages   *statementImages
@@ -635,22 +644,38 @@ func (m *WorkspaceModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.loadHistory()
 	case key.Matches(msg, m.keys.Tests):
 		return m.openCaseManager()
+	case key.Matches(msg, m.keys.Copy):
+		// F1 keyboard fallback: copy the whole focused pane's visible content
+		// when there's no active drag selection to copy instead (e.g.
+		// terminals without OSC 52 support).
+		if m.sel.hasSelection && m.selPane == m.focused {
+			m.copySelection()
+		} else {
+			m.copyText(plainViewportText(m.focusedViewport().View()))
+		}
+		return m, nil
 	case key.Matches(msg, m.keys.Up):
+		m.sel.clear()
 		m.focusedViewport().ScrollUp(2)
 		return m, nil
 	case key.Matches(msg, m.keys.Down):
+		m.sel.clear()
 		m.focusedViewport().ScrollDown(2)
 		return m, nil
 	case key.Matches(msg, m.keys.PageUp):
+		m.sel.clear()
 		m.focusedViewport().PageUp()
 		return m, nil
 	case key.Matches(msg, m.keys.PageDown):
+		m.sel.clear()
 		m.focusedViewport().PageDown()
 		return m, nil
 	case key.Matches(msg, m.keys.Top):
+		m.sel.clear()
 		m.focusedViewport().GotoTop()
 		return m, nil
 	case key.Matches(msg, m.keys.Bottom):
+		m.sel.clear()
 		m.focusedViewport().GotoBottom()
 		return m, nil
 	}
@@ -752,9 +777,7 @@ func (m *WorkspaceModel) wheelAtEdge(msg tea.MouseMsg) bool {
 
 func (m *WorkspaceModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if m.showHints {
-		var cmd tea.Cmd
-		m.hints, cmd = m.hints.Update(msg)
-		return m, cmd
+		return m.handleHintsMouse(msg)
 	}
 	if m.showHistory {
 		if m.historyDetail {
@@ -767,6 +790,19 @@ func (m *WorkspaceModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if m.cases != nil {
 		return m, nil
 	}
+
+	// A drag already in progress: route its motion/release to the pane it
+	// started in regardless of which pane the cursor is over now (dragging
+	// past a pane's edge still extends the selection, matching normal
+	// terminal drag-select) rather than re-resolving paneAt below. Any other
+	// action (in practice, a stray press with no matching release — mouse
+	// protocols always pair the two for a real drag) falls through to normal
+	// click dispatch instead of being swallowed; begin()/relayout() below
+	// reset sel.active cleanly either way.
+	if m.sel.active && (msg.Action == tea.MouseActionMotion || msg.Action == tea.MouseActionRelease) {
+		return m.continueSelection(msg)
+	}
+
 	p, ok := m.paneAt(msg.X, msg.Y)
 	if !ok {
 		return m, nil
@@ -776,8 +812,10 @@ func (m *WorkspaceModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		// Only vertical wheel scrolls; ignore trackpad WheelLeft/Right noise.
 		switch msg.Button {
 		case tea.MouseButtonWheelUp:
+			m.sel.clear()
 			m.paneViewport(p).ScrollUp(wheelScrollLines)
 		case tea.MouseButtonWheelDown:
+			m.sel.clear()
 			m.paneViewport(p).ScrollDown(wheelScrollLines)
 		}
 	case msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft:
@@ -785,14 +823,61 @@ func (m *WorkspaceModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			m.focused = p
 			m.relayout()
 		}
+		if lx, ly, ok := localCell(msg.X, msg.Y, m.layout.RectFor(p)); ok {
+			m.selPane = p
+			m.sel.begin(lx, ly)
+		}
 	}
 	return m, nil
+}
+
+// continueSelection routes an in-progress drag's motion and release events
+// (see handleMouse) to the pane it started in (selPane) — coordinates are
+// clamped to that pane's body rather than re-validated, so dragging past the
+// border still extends the selection instead of freezing it.
+func (m *WorkspaceModel) continueSelection(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	r := m.layout.RectFor(m.selPane)
+	lx, ly := clampCell(msg.X, msg.Y, r)
+	if msg.Action == tea.MouseActionRelease {
+		m.sel.end(lx, ly)
+		m.copySelection()
+		return m, nil
+	}
+	m.sel.extend(lx, ly)
+	return m, nil
+}
+
+// copySelection finalizes a finished selection over selPane: copies its
+// plain text to the system clipboard via OSC 52 and leaves a one-line
+// confirmation in the status bar. A no-op for a plain click (no drag) — see
+// selectionState.end.
+func (m *WorkspaceModel) copySelection() {
+	if !m.sel.hasSelection {
+		return
+	}
+	vp := m.paneViewport(m.selPane)
+	m.copyText(selectedText(strings.Split(vp.View(), "\n"), m.sel))
+}
+
+// copyText writes text to the system clipboard (OSC 52, via the same
+// *ImageWriter already wired in for out-of-band escape injection — see
+// imgwriter.go) and leaves a one-line status-bar confirmation, reusing the
+// same statusMsg mechanism run/submit/sync results already report through.
+func (m *WorkspaceModel) copyText(text string) {
+	if text == "" {
+		return
+	}
+	if m.imgWriter != nil {
+		m.imgWriter.Queue(osc52Copy(text))
+	}
+	m.statusMsg = copiedStatusMsg(text)
 }
 
 func (m *WorkspaceModel) relayout() {
 	if m.width == 0 || m.height == 0 {
 		return
 	}
+	m.sel.clear() // pane geometry is about to change under it
 	m.layout = Compute(m.width, m.height, m.focused, m.mode)
 
 	set := func(vp *viewport.Model, r Rect) {
@@ -851,6 +936,9 @@ func (m *WorkspaceModel) refreshStatement() {
 	}, w)
 	body, prefix := renderStatementMD(m.stmtRenderer, m.q.Statement, w, m.stmtImages)
 	m.statement.SetContent(strings.TrimRight(header+body, "\n"))
+	if m.selPane == PaneStatement {
+		m.sel.clear()
+	}
 	m.imgWritten = queueImagePrefix(m.imgWriter, prefix, m.imgWritten)
 }
 
@@ -859,6 +947,9 @@ func (m *WorkspaceModel) refreshCode() {
 		return
 	}
 	m.code.SetContent(gutter(highlightCode(m.codeSrc, m.ws.Lang), m.th.Muted))
+	if m.selPane == PaneCode {
+		m.sel.clear()
+	}
 }
 
 func (m *WorkspaceModel) refreshResults() {
@@ -872,6 +963,9 @@ func (m *WorkspaceModel) refreshResults() {
 		body = renderResults(m.th, m.lastRun, m.lastErr, m.running, m.spin.View(), m.results.Width)
 	}
 	m.results.SetContent(body)
+	if m.selPane == PaneResults {
+		m.sel.clear()
+	}
 }
 
 // codeChangedSinceRun reports whether the solution or managed test cases have
@@ -952,13 +1046,18 @@ func (m *WorkspaceModel) renderPane(p Pane, r Rect, focused bool) string {
 		border, title = m.th.PaneBorderFocused, m.th.TitleFocused
 	}
 
+	body := vp.View()
+	if p == m.selPane {
+		body = applySelectionHighlight(body, m.sel, m.th.Selection)
+	}
+
 	if m.layout.Tabbed {
 		bd := border.GetBorderStyle()
 		top := borderContentRow(bd.TopLeft, bd.Top, bd.TopRight, lineStyle(border, true), m.tabStripContent(), r.W)
 		bottom := borderContentRow(bd.BottomLeft, bd.Bottom, bd.BottomRight, lineStyle(border, false), "", r.W)
-		return joinFrame(border, top, bottom, r, vp.View())
+		return joinFrame(border, top, bottom, r, body)
 	}
-	return numberedFrame(border, title, p.Number(), m.paneTitleText(p, title), r, vp.View())
+	return numberedFrame(border, title, p.Number(), m.paneTitleText(p, title), r, body)
 }
 
 // tabStripContent lists every workspace pane's number and name for the top
@@ -1042,6 +1141,8 @@ func (m *WorkspaceModel) renderHelp() string {
 		{"t", "manage test cases (add, edit, delete)"},
 		{"H", "open hints (hidden until you reveal them)"},
 		{"a", "recent local and remote attempt history"},
+		{"click+drag", "select text in Statement/Code/Results (copies on release)"},
+		{"y", "copy the focused pane's selection, or all of it if none"},
 		{"q", "back to browse (b also works)"}, {"?", "toggle this help"},
 	}
 	var b strings.Builder

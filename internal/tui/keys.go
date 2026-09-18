@@ -40,9 +40,14 @@ type KeyMap struct {
 	PageDown key.Binding
 	Top      key.Binding
 	Bottom   key.Binding
-	Help     key.Binding
-	Back     key.Binding
-	Quit     key.Binding
+	// Copy (F1) copies the focused pane's current text selection, or its
+	// whole visible content if there is no selection — a keyboard fallback
+	// for terminals without OSC 52 support. Deliberately left out of
+	// shortcutHints (F3 keeps that bar to 3 items); documented in `?` help.
+	Copy key.Binding
+	Help key.Binding
+	Back key.Binding
+	Quit key.Binding
 }
 
 // DefaultKeyMap returns the built-in bindings.
@@ -65,6 +70,7 @@ func DefaultKeyMap() KeyMap {
 		PageDown: key.NewBinding(key.WithKeys("pgdown", "ctrl+d"), key.WithHelp("pgdn", "page down")),
 		Top:      key.NewBinding(key.WithKeys("g", "home"), key.WithHelp("g", "top")),
 		Bottom:   key.NewBinding(key.WithKeys("G", "end"), key.WithHelp("G", "bottom")),
+		Copy:     key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "copy selection (or whole pane)")),
 		Help:     key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
 		Back:     key.NewBinding(key.WithKeys("b"), key.WithHelp("b", "back")),
 		Quit:     key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "back")),

@@ -259,12 +259,11 @@ func (m *BrowseModel) statusHeaderBlock(w int) string {
 
 	b.WriteString("\n")
 	link := th.Muted.Underline(true)
-	// TODO(F1): once internal/tui/render.go grows hyperlink(display, url)
-	// (OSC 8), wrap each of these three lines with it so they become
-	// Cmd/Ctrl-clickable in supporting terminals.
-	b.WriteString(link.Render("repo      "+lazyleetRepoURL) + "\n")
-	b.WriteString(link.Render("issues    "+lazyleetIssuesURL) + "\n")
-	b.WriteString(link.Render("releases  "+lazyleetReleasesURL) + "\n")
+	// OSC 8 (see hyperlink in render.go) makes these Cmd/Ctrl-clickable in
+	// supporting terminals; unsupported terminals just show the styled text.
+	b.WriteString(hyperlink(link.Render("repo      "+lazyleetRepoURL), lazyleetRepoURL) + "\n")
+	b.WriteString(hyperlink(link.Render("issues    "+lazyleetIssuesURL), lazyleetIssuesURL) + "\n")
+	b.WriteString(hyperlink(link.Render("releases  "+lazyleetReleasesURL), lazyleetReleasesURL) + "\n")
 
 	return b.String()
 }
@@ -516,7 +515,8 @@ func (m *BrowseModel) detailTitle() string {
 
 func (m *BrowseModel) detailBody() string {
 	if m.detailShowsStatus {
-		return m.previewVP.View() // holds statusDetailBody, set by refreshDetail
+		// holds statusDetailBody, set by refreshDetail
+		return applySelectionHighlight(m.previewVP.View(), m.detailSel, m.th.Selection)
 	}
 	// The viewport still holds the previously shown statement until the new
 	// one is fetched and rendered; don't show stale content for the wrong row.
@@ -527,7 +527,7 @@ func (m *BrowseModel) detailBody() string {
 	case m.previewLoading || stale:
 		return m.th.Spinner.Render(m.spin.View()) + " loading statement…"
 	default:
-		return m.previewVP.View()
+		return applySelectionHighlight(m.previewVP.View(), m.detailSel, m.th.Selection)
 	}
 }
 
@@ -588,6 +588,8 @@ func (m *BrowseModel) renderHelp() string {
 		{"c", "clear all filters + sort"},
 		{"s", "sync problem cache from LeetCode"},
 		{"t", "filter by topic tags (match all selected)"},
+		{"click+drag", "select text in the Detail pane (copies on release)"},
+		{"y", "copy Detail pane's selection, or all of it if none"},
 		{"z", "zoom the focused pane"}, {"?", "toggle this help"}, {"q", "quit"},
 	}
 	var b strings.Builder
