@@ -53,21 +53,48 @@ func DefaultBrowseKeyMap() BrowseKeyMap {
 	}
 }
 
-func (k BrowseKeyMap) shortcutHints(filtering bool) []hint {
+// shortcutHints returns the bindings to show in the status bar: at most 3
+// hints for the currently focused region (the ones judged most-used there,
+// cf. lazygit's context-dependent bottom bar), plus a trailing, always-present
+// `?` help hint so full reference is never more than one keypress away. The
+// `?` help overlay documents every binding in full — this bar deliberately
+// shows only the hottest few.
+//
+// filtering overrides everything else: while the fuzzy filter textinput is
+// focused, only its own bindings are meaningful, so that special-case list
+// wins regardless of region (unchanged from before this became region-aware).
+func (k BrowseKeyMap) shortcutHints(filtering bool, focus Region) []hint {
 	if filtering {
 		return []hint{
 			{"↵", "apply"}, {"esc", "cancel"}, {"type", "to filter"},
 		}
 	}
-	return []hint{
-		{k.Open.Help().Key, k.Open.Help().Desc},
-		{k.Filter.Help().Key, k.Filter.Help().Desc},
-		{"d/f/p", "filter"},
-		{k.FilterTags.Help().Key, k.FilterTags.Help().Desc},
-		{k.Sort.Help().Key, k.Sort.Help().Desc},
-		{k.NextPane.Help().Key, k.NextPane.Help().Desc},
-		{k.Sync.Help().Key, k.Sync.Help().Desc},
-		{k.Help.Help().Key, k.Help.Help().Desc},
-		{k.Quit.Help().Key, k.Quit.Help().Desc},
+	var hints []hint
+	switch focus {
+	case RegionStatus:
+		hints = []hint{
+			{k.Sync.Help().Key, k.Sync.Help().Desc},
+			{k.NextPane.Help().Key, k.NextPane.Help().Desc},
+			{k.Zoom.Help().Key, k.Zoom.Help().Desc},
+		}
+	case RegionSources:
+		hints = []hint{
+			{k.Up.Help().Key + " " + k.Down.Help().Key, "select"},
+			{k.Open.Help().Key, k.Open.Help().Desc},
+			{k.NextPane.Help().Key, k.NextPane.Help().Desc},
+		}
+	case RegionList:
+		hints = []hint{
+			{k.Open.Help().Key, k.Open.Help().Desc},
+			{k.Filter.Help().Key, k.Filter.Help().Desc},
+			{k.Sort.Help().Key, k.Sort.Help().Desc},
+		}
+	case RegionDetail:
+		hints = []hint{
+			{k.Up.Help().Key + " " + k.Down.Help().Key, "scroll"},
+			{k.NextPane.Help().Key, k.NextPane.Help().Desc},
+			{k.Zoom.Help().Key, k.Zoom.Help().Desc},
+		}
 	}
+	return append(hints, hint{k.Help.Help().Key, k.Help.Help().Desc})
 }
