@@ -181,6 +181,37 @@ func newDebugCmd(app *appContext) *cobra.Command {
 		},
 	})
 
+	var subsLimit, subsOffset int
+	subsCmd := &cobra.Command{
+		Use:   "submissions <slug>",
+		Short: "Fetch and print a problem's submission history from LeetCode (requires auth)",
+		Long: "Exercises questionSubmissionList (internal/leetcode/submissions.go), " +
+			"verified against live LeetCode 2026-09-17. Re-run this after touching " +
+			"that file to confirm LeetCode's schema still matches.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client, err := app.newClient()
+			if err != nil {
+				return err
+			}
+			page, err := client.SubmissionList(cmd.Context(), args[0], subsLimit, subsOffset)
+			if err != nil {
+				return err
+			}
+			out := cmd.OutOrStdout()
+			fmt.Fprintf(out, "%d submissions (hasNext=%v lastKey=%q)\n", len(page.Submissions), page.HasNext, page.LastKey)
+			tw := tabwriter.NewWriter(out, 0, 2, 2, ' ', 0)
+			defer tw.Flush()
+			for _, s := range page.Submissions {
+				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", s.RemoteID, s.StatusDisplay, s.Lang, s.Runtime, s.Memory)
+			}
+			return nil
+		},
+	}
+	subsCmd.Flags().IntVar(&subsLimit, "limit", 10, "max rows")
+	subsCmd.Flags().IntVar(&subsOffset, "offset", 0, "page offset (lastKey is not a working cursor for this query, see submissions.go)")
+	debug.AddCommand(subsCmd)
+
 	return debug
 }
 

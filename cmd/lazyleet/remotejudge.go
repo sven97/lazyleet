@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sven97/lazyleet/internal/attempt"
 	"github.com/sven97/lazyleet/internal/leetcode"
 	"github.com/sven97/lazyleet/internal/tui"
 )
@@ -118,6 +119,41 @@ func (r *remoteJudge) Submit(ctx context.Context, code string) (tui.RemoteOutcom
 		r.markSolved()
 	}
 	return out, nil
+}
+
+// Submissions implements tui.RemoteHistory: LeetCode's own submission record
+// for this problem, mapped into attempt.Entry (Kind "remote") so the
+// workspace history panel can merge it with lazyleet's local attempt log.
+// These entries are display-only — store.RecordAttempt never accepts Kind
+// "remote", so there is no risk of them getting persisted.
+func (r *remoteJudge) Submissions(ctx context.Context, limit int) ([]attempt.Entry, error) {
+	client, err := r.authenticatedClient(ctx)
+	if err != nil {
+		return nil, err
+	}
+	page, err := client.SubmissionList(ctx, r.slug, limit, 0)
+	if err != nil {
+		return nil, err
+	}
+	entries := make([]attempt.Entry, 0, len(page.Submissions))
+	for _, s := range page.Submissions {
+		verdict := s.StatusDisplay
+		if verdict == "" {
+			verdict = "Unknown"
+		}
+		entries = append(entries, attempt.Entry{
+			Slug:      r.slug,
+			Lang:      s.Lang,
+			Kind:      "remote",
+			Verdict:   verdict,
+			Runtime:   s.Runtime,
+			Memory:    s.Memory,
+			RemoteID:  s.RemoteID,
+			CreatedAt: time.Unix(s.Timestamp, 0),
+			Detail:    "From LeetCode's own submission history: https://leetcode.com" + s.URL,
+		})
+	}
+	return entries, nil
 }
 
 func (r *remoteJudge) markSolved() {

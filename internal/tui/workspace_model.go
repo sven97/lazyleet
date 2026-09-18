@@ -91,6 +91,7 @@ type WorkspaceModel struct {
 	hintsRendererWidth int
 	cases              *caseManager
 	history            attempt.Repository
+	remoteHistory      RemoteHistory
 	showHistory        bool
 	historyGeneration  int
 	historyLoading     bool
