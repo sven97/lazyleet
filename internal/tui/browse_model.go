@@ -538,7 +538,7 @@ func (m *BrowseModel) regionAt(x, y int) (Region, bool) {
 
 // listRowAt maps a terminal row to a filtered-list index, or -1.
 func (m *BrowseModel) listRowAt(my int) int {
-	top := m.layout.List.Y + 2 // border + title
+	top := m.layout.List.Y + 1 // border (the title lives in the border row now)
 	if m.filtering {
 		top++ // filter input line
 	}
@@ -564,7 +564,7 @@ func (m *BrowseModel) sourceRowAt(my int) int {
 	}
 	// Body layout: 0 "PROBLEMS", 1 All Problems, 2 Daily Question, 3 blank,
 	// 4 "STUDY PLANS", 5 plan[0], 6 plan[1], … → plan[k] at line 3+k (k>=2).
-	body := my - (m.layout.Sources.Y + 2) // border + title
+	body := my - (m.layout.Sources.Y + 1) // border (the title lives in the border row now)
 	if body < 0 {
 		return -1
 	}
@@ -740,6 +740,23 @@ func (m *BrowseModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.fltTags = nil
 		m.fltDiff, m.fltStatus, m.fltHidePaid, m.sortMode = "", "", false, sortByID
 		return m.afterListChange()
+	}
+
+	// F2 digit-jump: 1-4 focus Status/Sources/Problems/Detail straight away,
+	// from any pane, mirroring lazygit's numbered panels. Gated on !showHelp
+	// like the other modal/overlay guards above (topicPicker and filtering
+	// already returned earlier in this function); guarded against an empty
+	// rect so a still-narrow layout switches the visible pane rather than
+	// no-oping (in practice ComputeBrowse never actually produces an empty
+	// rect for any region — Single mode gives every region the full work
+	// area — but this keeps the guard meaningful if that ever changes).
+	if !m.showHelp {
+		if n, ok := digitKey(msg); ok {
+			if reg, ok := regionForNumber(n); ok && !m.layout.RectFor(reg).Empty() {
+				m.setFocus(reg)
+				return m, m.refreshDetail()
+			}
+		}
 	}
 
 	switch m.focus {
@@ -1066,9 +1083,10 @@ func (m *BrowseModel) currentRow() (BrowseRow, bool) {
 }
 
 func (m *BrowseModel) listRows() int {
-	// The frame eats border(2) + title(1); the list body prints its own
-	// column-header line. What's left is data rows.
-	h := m.layout.List.H - 3 - 1
+	// The frame eats border(2) — the title lives in the border row now, not
+	// a separate line; the list body prints its own column-header line.
+	// What's left is data rows.
+	h := m.layout.List.H - 2 - 1
 	if h < 1 {
 		return 1
 	}

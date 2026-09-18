@@ -46,7 +46,7 @@ func TestBrowseRegionAt(t *testing.T) {
 func TestBrowseClickListRowSelectsThenOpens(t *testing.T) {
 	m, _ := bootBrowse(t)
 	// row 1 of the list (0-indexed within m.filtered): terminal Y for that row.
-	y := m.layout.List.Y + 3 + 1 // border + title + header, then row index 1
+	y := m.layout.List.Y + 2 + 1 // border + header, then row index 1
 	x := m.layout.List.X + 5
 
 	step(&m, press(x, y))
@@ -200,7 +200,7 @@ func TestBrowseClickSourceActivatesIt(t *testing.T) {
 	x := m.layout.Sources.X + 3
 	// body lines: 0 PROBLEMS, 1 All, 2 Daily, 3 blank, 4 STUDY PLANS, 5 Starter
 	step(&m, planSlugsMsg{slug: "starter", slugs: f.planMap["starter"]})
-	step(&m, press(x, m.layout.Sources.Y+2+5))
+	step(&m, press(x, m.layout.Sources.Y+1+5))
 	if m.activeSrc != 2 {
 		t.Fatalf("clicking the plan row should activate it, activeSrc=%d", m.activeSrc)
 	}
@@ -210,7 +210,7 @@ func TestBrowseClickSourceActivatesIt(t *testing.T) {
 
 	// clicking the Daily Question row applies it: list shows just today's problem
 	step(&m, dailyLoadedMsg{info: f.daily})
-	step(&m, press(x, m.layout.Sources.Y+2+2))
+	step(&m, press(x, m.layout.Sources.Y+1+2))
 	if m.activeSourceKind() != srcDaily {
 		t.Fatalf("clicking Daily should activate it, kind=%d", m.activeSourceKind())
 	}

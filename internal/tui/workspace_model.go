@@ -654,6 +654,24 @@ func (m *WorkspaceModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.focusedViewport().GotoBottom()
 		return m, nil
 	}
+
+	// F2 digit-jump: 1-3 focus Statement/Code/Results straight away, from any
+	// pane, mirroring lazygit's numbered panels. While zoomed/tabbed this
+	// switches *which* pane is zoomed (m.mode is left untouched) rather than
+	// no-opping or exiting zoom, matching lazygit's own screen-mode behavior.
+	// Gated on !showHelp like the other modal guards above; the rect-empty
+	// guard mirrors browse's equivalent (see browse_model.go) — in practice
+	// Compute() never actually leaves a pane's rect empty (tabbed mode gives
+	// every pane the full work area) but the check stays meaningful either way.
+	if !m.showHelp {
+		if n, ok := digitKey(msg); ok {
+			if p, ok := paneForNumber(n); ok && !m.layout.RectFor(p).Empty() {
+				m.focused = p
+				m.relayout()
+				return m, nil
+			}
+		}
+	}
 	return m, nil
 }
 
@@ -799,10 +817,12 @@ func (m *WorkspaceModel) relayout() {
 	m.refreshResults()
 }
 
-// innerSize is the content area inside a pane's border and title row.
+// innerSize is the content area inside a pane's border — the title lives in
+// the top border row now (see numberedFrame in frame.go), not a separate
+// line, so there's nothing else to subtract.
 func innerSize(r Rect) (w, h int) {
 	w = r.W - 2 // border
-	h = r.H - 3 // border (2) + title row (1)
+	h = r.H - 2 // border
 	if w < 1 {
 		w = 1
 	}
@@ -907,6 +927,12 @@ func (m *WorkspaceModel) View() (out string) {
 	return lipgloss.JoinVertical(lipgloss.Left, body, m.renderStatusBar())
 }
 
+// renderPane draws one bordered pane. In the normal (two-column) layout that
+// means numberedFrame's usual "[N]-Title" top border. In the tabbed layout
+// (narrow terminal or zoom — only one pane is ever visible) the top border
+// instead carries a strip naming every pane, the focused one bracketed, via
+// tabStripContent — that's the only way to still see the other two panes'
+// numbers to jump to.
 func (m *WorkspaceModel) renderPane(p Pane, r Rect, focused bool) string {
 	if r.Empty() {
 		return ""
@@ -921,34 +947,44 @@ func (m *WorkspaceModel) renderPane(p Pane, r Rect, focused bool) string {
 		vp = m.code
 	}
 
-	title := m.paneTitle(p, focused)
-	inner := lipgloss.JoinVertical(lipgloss.Left, title, vp.View())
-
-	border := m.th.PaneBorder
+	border, title := m.th.PaneBorder, m.th.Title
 	if focused {
-		border = m.th.PaneBorderFocused
+		border, title = m.th.PaneBorderFocused, m.th.TitleFocused
 	}
-	return border.Width(r.W - 2).Height(r.H - 2).Render(inner)
+
+	if m.layout.Tabbed {
+		bd := border.GetBorderStyle()
+		top := borderContentRow(bd.TopLeft, bd.Top, bd.TopRight, lineStyle(border, true), m.tabStripContent(), r.W)
+		bottom := borderContentRow(bd.BottomLeft, bd.Bottom, bd.BottomRight, lineStyle(border, false), "", r.W)
+		return joinFrame(border, top, bottom, r, vp.View())
+	}
+	return numberedFrame(border, title, p.Number(), m.paneTitleText(p, title), r, vp.View())
 }
 
-func (m *WorkspaceModel) paneTitle(p Pane, focused bool) string {
-	ts := m.th.Title
-	if focused {
-		ts = m.th.TitleFocused
-	}
-	if m.layout.Tabbed {
-		var parts []string
-		for _, q := range []Pane{PaneStatement, PaneCode, PaneResults} {
-			label := " " + q.String() + " "
-			if q == p {
-				parts = append(parts, m.th.TitleFocused.Render("["+q.String()+"]"))
-			} else {
-				parts = append(parts, m.th.Title.Render(label))
-			}
+// tabStripContent lists every workspace pane's number and name for the top
+// border in tabbed mode, the focused one bracketed — e.g.
+// "1:Statement  [2:Code]  3:Results" — so the other two panes' digits stay
+// visible as a reminder of what pressing them (or Tab) switches to.
+func (m *WorkspaceModel) tabStripContent() string {
+	var parts []string
+	for _, q := range []Pane{PaneStatement, PaneCode, PaneResults} {
+		label := fmt.Sprintf("%d:%s", q.Number(), q.String())
+		if q == m.focused {
+			parts = append(parts, m.th.TitleFocused.Render("["+label+"]"))
+		} else {
+			parts = append(parts, m.th.Title.Render(" "+label+" "))
 		}
-		return strings.Join(parts, " ")
 	}
+	return strings.Join(parts, " ")
+}
 
+// paneTitleText builds pane p's title, styled with ts (the same Title/
+// TitleFocused the pane's number bracket uses) — the text embedded in the
+// top border to the right of "[N]" via numberedFrame. PaneCode's "unrun"
+// marker keeps its own ErrorText color rather than inheriting ts, which is
+// why this returns an already-styled string rather than plain text for
+// numberedFrame to wrap itself.
+func (m *WorkspaceModel) paneTitleText(p Pane, ts lipgloss.Style) string {
 	switch p {
 	case PaneStatement:
 		return ts.Render(problemTitle(m.q.FrontendID, m.q.Title, m.q.PaidOnly))
@@ -996,6 +1032,7 @@ func (m *WorkspaceModel) renderHelp() string {
 		{"ctrl+u / ctrl+d", "page up / down"},
 		{"g / G", "jump to top / bottom"},
 		{"tab / ⇧tab", "next / prev pane (h / l also work)"},
+		{"1-3", "jump straight to Statement / Code / Results"},
 		{"z", "zoom the focused pane"},
 		{"e", "edit in $EDITOR"},
 		{"r", "run local tests"},
