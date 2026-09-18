@@ -7,9 +7,12 @@ import (
 	"time"
 )
 
-// wideStatusModel and narrowStatusModel are just past/below lazyleetArtWidth,
-// the ASCII-art fallback threshold statusHeaderBlock uses.
-func wideStatusWidth() int   { return lazyleetArtWidth + 10 }
+// wideStatusModel and narrowStatusModel are just past/below the widest line
+// statusHeaderBlock renders. The "releases" link line is wider than
+// lazyleetArt itself, so wideStatusWidth must clear that, not just
+// lazyleetArtWidth, or it isn't actually wide enough to show everything
+// uncut.
+func wideStatusWidth() int   { return len("releases  "+lazyleetReleasesURL) + 10 }
 func narrowStatusWidth() int { return lazyleetArtWidth - 10 }
 
 func TestStatusDetailBodyOrdersHeaderLinksThenLiveSections(t *testing.T) {
@@ -112,6 +115,33 @@ func TestStatusDetailBodyDailyLoadingAndErrorStates(t *testing.T) {
 	}
 }
 
+// TestStatusHeaderBlockTruncatesLinksNarrowerThanArt covers the gap the art-
+// width fallback check alone doesn't: the "releases" link line is wider than
+// lazyleetArt itself, so a pane wide enough to show the art (w >=
+// lazyleetArtWidth) — like a default 80-column terminal's ~48-col Detail
+// pane — can still be too narrow for the full URLs. Without truncating them
+// to w, the viewport would hard-cut them with no ellipsis once any line in
+// the body exceeds its width.
+func TestStatusHeaderBlockTruncatesLinksNarrowerThanArt(t *testing.T) {
+	m := &BrowseModel{th: DefaultTheme(), version: "v1.2.3"}
+	full := "releases  " + lazyleetReleasesURL
+
+	narrow := lazyleetArtWidth + 2 // fits the art, not the full releases line
+	got := m.statusHeaderBlock(narrow)
+	if strings.Contains(got, full) {
+		t.Errorf("w=%d should truncate the releases link (full line is %d cols):\n%s", narrow, len(full), got)
+	}
+	if !strings.Contains(got, "…") {
+		t.Errorf("a truncated link line should end with an ellipsis, not be silently cut:\n%s", got)
+	}
+
+	wide := len(full) + 5
+	got = m.statusHeaderBlock(wide)
+	if !strings.Contains(got, full) {
+		t.Errorf("w=%d is wide enough for the full releases link, want it uncut:\n%s", wide, got)
+	}
+}
+
 func TestStatusDetailBodyOmitsVersionLineWhenUnset(t *testing.T) {
 	m := &BrowseModel{th: DefaultTheme()}
 	got := m.statusDetailBody(wideStatusWidth())
@@ -119,12 +149,5 @@ func TestStatusDetailBodyOmitsVersionLineWhenUnset(t *testing.T) {
 	// (nothing to plumb through in tests that don't call SetVersion).
 	if !strings.Contains(got, "lazyleet") {
 		t.Errorf("header should still render without a version set:\n%s", got)
-	}
-}
-
-func TestAsciiArtWidthMatchesWidestLine(t *testing.T) {
-	art := "ab\nabcd\nabc"
-	if got := asciiArtWidth(art); got != 4 {
-		t.Errorf("asciiArtWidth(%q) = %d, want 4", art, got)
 	}
 }

@@ -198,19 +198,8 @@ const lazyleetArt = `#     ##  #### #  # #    #### #### ####
 // lazyleetArtWidth is lazyleetArt's rendered width in terminal columns,
 // computed from the art itself so a future tweak to the glyphs can't
 // silently desync statusHeaderBlock's narrow-pane fallback threshold.
-var lazyleetArtWidth = asciiArtWidth(lazyleetArt)
-
-// asciiArtWidth returns a (possibly multi-line) ASCII-art string's widest
-// line, in display columns.
-func asciiArtWidth(art string) int {
-	w := 0
-	for _, line := range strings.Split(art, "\n") {
-		if lw := lipgloss.Width(line); lw > w {
-			w = lw
-		}
-	}
-	return w
-}
+// lipgloss.Width already returns a multi-line string's widest line.
+var lazyleetArtWidth = lipgloss.Width(lazyleetArt)
 
 // lazyleetRepoURL and friends are the reference links shown in the
 // Status/About panel — only ones that actually resolve for this repo.
@@ -254,7 +243,7 @@ func (m *BrowseModel) statusHeaderBlock(w int) string {
 		b.WriteString(th.Title.Render("lazyleet") + "\n")
 	}
 	if m.version != "" {
-		b.WriteString(th.Muted.Render(m.version) + "\n")
+		b.WriteString(th.Muted.Render(truncate(m.version, w)) + "\n")
 	}
 
 	b.WriteString("\n")
@@ -262,9 +251,16 @@ func (m *BrowseModel) statusHeaderBlock(w int) string {
 	// TODO(F1): once internal/tui/render.go grows hyperlink(display, url)
 	// (OSC 8), wrap each of these three lines with it so they become
 	// Cmd/Ctrl-clickable in supporting terminals.
-	b.WriteString(link.Render("repo      "+lazyleetRepoURL) + "\n")
-	b.WriteString(link.Render("issues    "+lazyleetIssuesURL) + "\n")
-	b.WriteString(link.Render("releases  "+lazyleetReleasesURL) + "\n")
+	//
+	// Truncated to w like every other width-bound line in this file — the
+	// links (up to 53 cols for "releases") are wider than lazyleetArtWidth
+	// (39 cols), so a pane that's wide enough for the art (e.g. an 80-col
+	// terminal's default ~48-col Detail pane) can still be too narrow for
+	// the full URLs; without this they'd get silently hard-cut by the
+	// viewport with no ellipsis.
+	b.WriteString(link.Render(truncate("repo      "+lazyleetRepoURL, w)) + "\n")
+	b.WriteString(link.Render(truncate("issues    "+lazyleetIssuesURL, w)) + "\n")
+	b.WriteString(link.Render(truncate("releases  "+lazyleetReleasesURL, w)) + "\n")
 
 	return b.String()
 }
