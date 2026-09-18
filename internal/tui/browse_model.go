@@ -102,6 +102,11 @@ type BrowseModel struct {
 	imgWriter  *ImageWriter
 	imgWritten string
 
+	// version is main.versionString(), plumbed in via SetVersion so the
+	// package-main-only build info can appear in the Status/About panel
+	// without internal/tui importing cmd/lazyleet.
+	version string
+
 	auth AuthState
 
 	daily       DailyInfo
@@ -1215,7 +1220,7 @@ func (m *BrowseModel) setFocus(reg Region) {
 // pane's expanded info when it is focused, otherwise the problem statement.
 func (m *BrowseModel) refreshDetail() tea.Cmd {
 	if m.detailShowsStatus {
-		body := m.statusDetailBody()
+		body := m.statusDetailBody(m.previewVP.Width)
 		if body != m.previewRenderedBody {
 			m.previewVP.SetContent(body)
 			m.previewVP.GotoTop()
@@ -1232,6 +1237,13 @@ func (m *BrowseModel) EnableImages(proto termimg.Protocol, cacheDir string, iw *
 	m.imgProto = proto
 	m.imgDir = cacheDir
 	m.imgWriter = iw
+}
+
+// SetVersion supplies the build's version string (main.versionString()) for
+// display in the Status/About panel. Optional: an unset version simply omits
+// that line.
+func (m *BrowseModel) SetVersion(v string) {
+	m.version = v
 }
 
 type previewEntry struct {
