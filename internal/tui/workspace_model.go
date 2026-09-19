@@ -941,7 +941,16 @@ func (m *WorkspaceModel) refreshStatement() {
 	}, w)
 	body, prefix := renderStatementMD(m.stmtRenderer, m.q.Statement, w, m.stmtImages)
 	m.statement.SetContent(strings.TrimRight(header+body, "\n"))
-	if m.selPane == PaneStatement {
+	// Only clear a *finished* selection sitting over now-stale content — not
+	// one still mid-drag (button held). refreshCode/refreshResults share this
+	// same guard: refreshResults in particular fires on every spinner tick
+	// while a run/submit is in flight, which was clearing an in-progress
+	// click-drag out from under the user before they could release the
+	// mouse, with no error or feedback. Geometry-changing call sites
+	// (WindowSizeMsg, relayout, wheel/keyboard scroll) intentionally stay
+	// unconditional elsewhere — those really do invalidate mid-drag
+	// coordinates, unlike a routine content refresh.
+	if m.selPane == PaneStatement && !m.sel.active {
 		m.sel.clear()
 	}
 	m.imgWritten = queueImagePrefix(m.imgWriter, prefix, m.imgWritten)
@@ -952,7 +961,7 @@ func (m *WorkspaceModel) refreshCode() {
 		return
 	}
 	m.code.SetContent(gutter(highlightCode(m.codeSrc, m.ws.Lang), m.th.Muted))
-	if m.selPane == PaneCode {
+	if m.selPane == PaneCode && !m.sel.active {
 		m.sel.clear()
 	}
 }
@@ -968,7 +977,7 @@ func (m *WorkspaceModel) refreshResults() {
 		body = renderResults(m.th, m.lastRun, m.lastErr, m.running, m.spin.View(), m.results.Width)
 	}
 	m.results.SetContent(body)
-	if m.selPane == PaneResults {
+	if m.selPane == PaneResults && !m.sel.active {
 		m.sel.clear()
 	}
 }
