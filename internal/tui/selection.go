@@ -118,6 +118,19 @@ func selectedText(lines []string, s selectionState) string {
 // selected range is flattened to style rather than layered underneath it,
 // which is what keeps the highlight visually unambiguous over already-colored
 // text (a difficulty badge, a diff line, glamour's own link coloring, ...).
+//
+// Known limitation: prefix/suffix keep their original ANSI verbatim (as
+// intended, for text outside the highlight), but if a selection boundary
+// falls in the middle of an OSC 8-wrapped hyperlink's display text (see
+// hyperlink/linkifyURLs), the link's zero-width open marker can end up alone
+// in prefix with its close marker alone in suffix, with the stripped-and-
+// restyled mid in between carrying neither. Terminals that support OSC 8
+// tolerate this differently; it doesn't corrupt the visible text or the
+// selection's copied bytes (selectedText strips ANSI outright), only the
+// clickable region a partially-selected link presents while highlighted.
+// Not fixed here — doing so needs OSC-8-span-aware cutting, not just
+// cell-width-aware cutting, and no real terminal was available in this
+// sandbox to verify a fix against.
 func applySelectionHighlight(view string, s selectionState, style lipgloss.Style) string {
 	if !s.hasSelection {
 		return view

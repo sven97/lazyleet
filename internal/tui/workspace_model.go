@@ -776,6 +776,27 @@ func (m *WorkspaceModel) wheelAtEdge(msg tea.MouseMsg) bool {
 }
 
 func (m *WorkspaceModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	// A drag already in progress on one of the three numbered panes: route
+	// its motion/release to the pane it started in regardless of which pane
+	// the cursor is over now (dragging past a pane's edge still extends the
+	// selection, matching normal terminal drag-select) rather than
+	// re-resolving paneAt below. Any other action (in practice, a stray
+	// press with no matching release — mouse protocols always pair the two
+	// for a real drag) falls through to normal click dispatch instead of
+	// being swallowed; begin()/relayout() below reset sel.active cleanly
+	// either way.
+	//
+	// Deliberately checked BEFORE the showHints/showHistory/cases overlay
+	// guards below: a drag can start on a numbered pane and then have an
+	// overlay opened over it via the keyboard (H, a, t) before the button is
+	// released. If the release were swallowed by one of those guards
+	// instead, sel.active would be left stuck true with no way to finish or
+	// clear it until the next click — this lets an in-flight drag always
+	// reach its release, regardless of what opened in the meantime.
+	if m.sel.active && (msg.Action == tea.MouseActionMotion || msg.Action == tea.MouseActionRelease) {
+		return m.continueSelection(msg)
+	}
+
 	if m.showHints {
 		return m.handleHintsMouse(msg)
 	}
@@ -789,18 +810,6 @@ func (m *WorkspaceModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.cases != nil {
 		return m, nil
-	}
-
-	// A drag already in progress: route its motion/release to the pane it
-	// started in regardless of which pane the cursor is over now (dragging
-	// past a pane's edge still extends the selection, matching normal
-	// terminal drag-select) rather than re-resolving paneAt below. Any other
-	// action (in practice, a stray press with no matching release — mouse
-	// protocols always pair the two for a real drag) falls through to normal
-	// click dispatch instead of being swallowed; begin()/relayout() below
-	// reset sel.active cleanly either way.
-	if m.sel.active && (msg.Action == tea.MouseActionMotion || msg.Action == tea.MouseActionRelease) {
-		return m.continueSelection(msg)
 	}
 
 	p, ok := m.paneAt(msg.X, msg.Y)
@@ -864,13 +873,9 @@ func (m *WorkspaceModel) copySelection() {
 // imgwriter.go) and leaves a one-line status-bar confirmation, reusing the
 // same statusMsg mechanism run/submit/sync results already report through.
 func (m *WorkspaceModel) copyText(text string) {
-	if text == "" {
-		return
+	if msg := copyToClipboard(m.imgWriter, text); msg != "" {
+		m.statusMsg = msg
 	}
-	if m.imgWriter != nil {
-		m.imgWriter.Queue(osc52Copy(text))
-	}
-	m.statusMsg = copiedStatusMsg(text)
 }
 
 func (m *WorkspaceModel) relayout() {

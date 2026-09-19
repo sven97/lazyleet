@@ -597,9 +597,6 @@ func (m *BrowseModel) sourceRowAt(my int) int {
 }
 
 func (m *BrowseModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
-	if m.filtering || m.showHelp || m.topicPicker != nil {
-		return m, nil
-	}
 	// A drag already in progress: route its motion/release to the Detail pane
 	// it started in regardless of which region the cursor is over now
 	// (dragging past the pane's border still extends the selection, matching
@@ -608,8 +605,19 @@ func (m *BrowseModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	// mouse protocols always pair the two for a real drag) falls through to
 	// normal click dispatch instead of being swallowed; begin()/relayout()
 	// below reset detailSel.active cleanly either way.
+	//
+	// Deliberately checked BEFORE the filtering/help/topicPicker guard below:
+	// a drag can start on the Detail pane and then have an overlay opened
+	// over it via the keyboard (e.g. `?` or `/`) before the button is
+	// released. If the release were swallowed by that guard instead,
+	// detailSel.active would be left stuck true with no way to finish or
+	// clear it until the next click — this lets an in-flight drag always
+	// reach its release, regardless of what opened in the meantime.
 	if m.detailSel.active && (msg.Action == tea.MouseActionMotion || msg.Action == tea.MouseActionRelease) {
 		return m.continueDetailSelection(msg)
+	}
+	if m.filtering || m.showHelp || m.topicPicker != nil {
+		return m, nil
 	}
 	reg, ok := m.regionAt(msg.X, msg.Y)
 	if !ok {
@@ -715,13 +723,9 @@ func (m *BrowseModel) copyDetailSelection() {
 // imgwriter.go) and leaves a one-line status-bar confirmation, reusing the
 // same statusMsg mechanism run/submit/sync results already report through.
 func (m *BrowseModel) copyText(text string) {
-	if text == "" {
-		return
+	if msg := copyToClipboard(m.imgWriter, text); msg != "" {
+		m.statusMsg = msg
 	}
-	if m.imgWriter != nil {
-		m.imgWriter.Queue(osc52Copy(text))
-	}
-	m.statusMsg = copiedStatusMsg(text)
 }
 
 func (m *BrowseModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {

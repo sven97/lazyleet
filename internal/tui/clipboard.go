@@ -39,6 +39,21 @@ func copiedStatusMsg(text string) string {
 	return fmt.Sprintf("copied %d characters to clipboard", n)
 }
 
+// copyToClipboard queues text as an OSC 52 copy on iw (a no-op when iw is nil
+// or text is empty) and returns the status-bar confirmation to show, or ""
+// when nothing was copied. Shared by BrowseModel.copyText and
+// WorkspaceModel.copyText, which were previously identical, byte-for-byte
+// duplicates of this same three-line body.
+func copyToClipboard(iw *ImageWriter, text string) string {
+	if text == "" {
+		return ""
+	}
+	if iw != nil {
+		iw.Queue(osc52Copy(text))
+	}
+	return copiedStatusMsg(text)
+}
+
 // plainViewportText strips ANSI styling from a rendered viewport.View() and
 // trims each line's trailing pad space plus any trailing blank lines — used
 // by the `y` fallback, which copies a whole pane's currently visible content

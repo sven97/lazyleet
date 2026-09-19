@@ -133,14 +133,41 @@ var bareURLRe = regexp.MustCompile(`https?://[^\s\x1b]+`)
 
 // urlTrailingPunct is punctuation a greedy URL match often absorbs from the
 // surrounding sentence or markdown rather than the URL itself — a
-// sentence-ending period, a markdown link's closing paren, a quote closing a
-// blockquote, etc. Left outside the hyperlink wrap.
-const urlTrailingPunct = ".,;:!?)]}\"'"
+// sentence-ending period, a quote closing a blockquote, etc. Left outside the
+// hyperlink wrap. Brackets/parens are handled separately by
+// urlBracketPairs below, since — unlike this flat set — whether one belongs
+// to the URL depends on whether it's balanced.
+const urlTrailingPunct = ".,;:!?\"'"
 
-// splitTrailingURLPunct peels urlTrailingPunct runes off the end of u.
+// urlBracketPairs are the trailing closing brackets splitTrailingURLPunct
+// treats specially: a trailing closer is peeled off only when it ISN'T
+// balanced by an opener earlier in the same match, so a URL that
+// legitimately ends in a balanced pair (e.g. a Wikipedia-style
+// ".../Rust_(programming_language)") keeps its own closing paren, while one
+// genuinely absorbed from the surrounding markdown/sentence (e.g. "(see
+// https://example.com)") still gets stripped.
+var urlBracketPairs = map[byte]byte{')': '(', ']': '[', '}': '{'}
+
+// splitTrailingURLPunct peels urlTrailingPunct runes, and unbalanced trailing
+// brackets, off the end of u.
 func splitTrailingURLPunct(u string) (core, trail string) {
 	end := len(u)
-	for end > 0 && strings.ContainsRune(urlTrailingPunct, rune(u[end-1])) {
+	for end > 0 {
+		c := u[end-1]
+		if open, isCloser := urlBracketPairs[c]; isCloser {
+			// u[:end] still includes c itself here. If opens are already
+			// >= closes without it, c has no unmatched opener to pair with
+			// — it's not part of the URL, strip it. Otherwise it closes a
+			// real opener inside the URL — keep it.
+			if strings.Count(u[:end], string(open)) >= strings.Count(u[:end], string(c)) {
+				break
+			}
+			end--
+			continue
+		}
+		if !strings.ContainsRune(urlTrailingPunct, rune(c)) {
+			break
+		}
 		end--
 	}
 	return u[:end], u[end:]

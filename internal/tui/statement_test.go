@@ -123,6 +123,30 @@ func TestLinkifyURLsTrimsTrailingSentencePunctuation(t *testing.T) {
 	}
 }
 
+// TestLinkifyURLsKeepsBalancedTrailingBracket guards against a regression
+// where splitTrailingURLPunct stripped a trailing ')'/']'/'}' unconditionally,
+// corrupting both the displayed text and the click target of any URL whose
+// own path legitimately ends in a balanced bracket (common on Wikipedia-style
+// links) rather than one absorbed from the surrounding markdown/sentence.
+func TestLinkifyURLsKeepsBalancedTrailingBracket(t *testing.T) {
+	cases := map[string]string{
+		// The URL's own trailing ')' is balanced by its own '(' — keep it.
+		"see https://en.wikipedia.org/wiki/Rust_(programming_language) for more": "https://en.wikipedia.org/wiki/Rust_(programming_language)",
+		// Wrapped in markdown parens too: only the outer, unbalanced ')' from
+		// the markdown wrapping is stripped; the URL's own pair survives.
+		"(see https://en.wikipedia.org/wiki/Rust_(programming_language)).": "https://en.wikipedia.org/wiki/Rust_(programming_language)",
+		// A markdown-only wrap with no bracket in the URL itself still has
+		// its absorbed closing paren stripped, same as before this fix.
+		"(see https://example.com/x).": "https://example.com/x",
+	}
+	for in, wantURL := range cases {
+		got := linkifyURLs(in)
+		if !strings.Contains(got, "\x1b]8;;"+wantURL+"\x1b\\") {
+			t.Errorf("linkifyURLs(%q) = %q, want it to wrap exactly %q", in, got, wantURL)
+		}
+	}
+}
+
 // TestLinkifyURLsStopsBeforeANSIEscape reproduces glamour's own link
 // rendering shape: BaseElement prints the URL's own SGR-styled run with a
 // style-reset code directly appended, no separating space (see

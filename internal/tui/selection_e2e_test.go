@@ -124,6 +124,41 @@ func TestBrowseDetailDragSelectionCopiesExactPlainText(t *testing.T) {
 	}
 }
 
+// TestBrowseDetailDragSurvivesOverlayOpenedMidDrag guards against a
+// regression where handleMouse's filtering/showHelp/topicPicker guard ran
+// before the active-drag check: opening any of those overlays via the
+// keyboard between a drag's press and release (e.g. pressing `?` mid-drag)
+// swallowed the release, leaving detailSel.active stuck true with no way to
+// finish or clear the selection until the next click.
+func TestBrowseDetailDragSurvivesOverlayOpenedMidDrag(t *testing.T) {
+	m, _ := bootBrowse(t)
+	tc := newTestClipboard(t)
+	m.imgWriter = tc.iw
+
+	m.setFocus(RegionDetail)
+	m.detailShowsStatus = false
+	m.previewVP.SetContent(dragContent)
+	m.previewContentSlug = m.currentSlug()
+
+	r := m.layout.Detail
+	anchorX, anchorY := r.X+1+6, r.Y+1+0
+	releaseX, releaseY := r.X+1+4, r.Y+1+2
+
+	step(&m, press(anchorX, anchorY))
+	step(&m, motion(releaseX, releaseY))
+	m.showHelp = true // simulate `?` opening the help overlay mid-drag
+	step(&m, release(releaseX, releaseY))
+	m.showHelp = false
+
+	want := "world\n" + dragLine1 + "\nthird"
+	if got := decodeOSC52(t, tc.flush(t)); got != want {
+		t.Fatalf("copied text =\n%q\nwant\n%q", got, want)
+	}
+	if m.detailSel.active {
+		t.Error("detailSel.active should be false after release, even though an overlay was open when it arrived")
+	}
+}
+
 // TestBrowseDetailReversedDragCopiesSameText mirrors the drag above but
 // starts the press where the previous test released, and releases where it
 // pressed — a reversed drag must normalize to the exact same copied text.
@@ -236,6 +271,54 @@ func TestWorkspaceCodeDragSelectionCopiesExactPlainText(t *testing.T) {
 	}
 	if !strings.Contains(m.statusMsg, "copied") {
 		t.Errorf("expected a status-bar copy confirmation, got %q", m.statusMsg)
+	}
+}
+
+// TestWorkspaceDragSurvivesHintsOpenedMidDrag is the workspace-side
+// equivalent of TestBrowseDetailDragSurvivesOverlayOpenedMidDrag: opening the
+// Hints overlay (the `H` key) between a drag's press and release must not
+// swallow the release, since m.showHints was previously checked before the
+// active-drag routing in handleMouse.
+func TestWorkspaceDragSurvivesHintsOpenedMidDrag(t *testing.T) {
+	q, _ := leetcode.Fixture("two-sum")
+	ws, err := workspace.Scaffold(t.TempDir(), q, "python3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := NewWorkspaceModel(ws, q, "true", false, 400, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	up, _ := m.Update(tea.WindowSizeMsg{Width: 140, Height: 40})
+	m = up.(*WorkspaceModel)
+
+	tc := newTestClipboard(t)
+	m.imgWriter = tc.iw
+
+	m.focused = PaneCode
+	m.relayout()
+	m.code.SetContent(dragContent)
+
+	r := m.layout.RectFor(PaneCode)
+	anchorX, anchorY := r.X+1+6, r.Y+1+0
+	releaseX, releaseY := r.X+1+4, r.Y+1+2
+
+	upModel, _ := m.Update(press(anchorX, anchorY))
+	m = upModel.(*WorkspaceModel)
+	upModel, _ = m.Update(motion(releaseX, releaseY))
+	m = upModel.(*WorkspaceModel)
+	m.showHints = true // simulate `H` opening the hints overlay mid-drag
+	upModel, _ = m.Update(release(releaseX, releaseY))
+	m = upModel.(*WorkspaceModel)
+	m.showHints = false
+
+	want := "world\n" + dragLine1 + "\nthird"
+	if got := decodeOSC52(t, tc.flush(t)); got != want {
+		t.Fatalf("copied text =\n%q\nwant\n%q", got, want)
+	}
+	if m.sel.active {
+		t.Error("sel.active should be false after release, even though Hints was open when it arrived")
 	}
 }
 
