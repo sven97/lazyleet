@@ -352,8 +352,10 @@ func TestWorkspaceDragPastPaneEdgeClampsToEdge(t *testing.T) {
 	// Drag far outside the pane entirely (negative and huge coordinates).
 	upModel, _ = m.Update(motion(-100, -100))
 	m = upModel.(*WorkspaceModel)
-	upModel, _ = m.Update(release(100000, 100000))
-	m = upModel.(*WorkspaceModel)
+	// The final release's returned model is never read again after this —
+	// the assertions below only need tc.flush(t), not m — so it's discarded
+	// rather than reassigned into m (staticcheck SA4006: dead store).
+	m.Update(release(100000, 100000))
 
 	got := decodeOSC52(t, tc.flush(t))
 	if !strings.Contains(got, dragLine0) {
