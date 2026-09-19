@@ -27,6 +27,20 @@ func (p Pane) String() string {
 func (p Pane) Next() Pane { return (p + 1) % paneCount }
 func (p Pane) Prev() Pane { return (p + paneCount - 1) % paneCount }
 
+// Number is the pane's 1-based digit-key/border-title number: PaneStatement=1
+// … PaneResults=3.
+func (p Pane) Number() int { return int(p) + 1 }
+
+// paneForNumber is Number's inverse: the pane a pressed digit jumps to (or,
+// while zoomed, switches the zoom to), or ok=false if n isn't a valid pane
+// number in workspace mode.
+func paneForNumber(n int) (p Pane, ok bool) {
+	if n < 1 || n > int(paneCount) {
+		return 0, false
+	}
+	return Pane(n - 1), true
+}
+
 // ScreenMode is the workspace's overall layout mode (cf. lazygit screen modes).
 type ScreenMode int
 

@@ -10,6 +10,56 @@ import (
 	"github.com/sven97/lazyleet/internal/testcase"
 )
 
+// TestHyperlinkWrapsWithOSC8 golden-tests the exact escape-sequence bytes
+// hyperlink produces: start marker, URL, ST, display text, end marker.
+func TestHyperlinkWrapsWithOSC8(t *testing.T) {
+	got := hyperlink("click me", "https://example.com/path")
+	want := "\x1b]8;;https://example.com/path\x1b\\click me\x1b]8;;\x1b\\"
+	if got != want {
+		t.Fatalf("hyperlink() =\n%q\nwant\n%q", got, want)
+	}
+}
+
+// TestHyperlinkRoundTripsDisplayText asserts the visible text survives OSC 8
+// wrapping unchanged — stripping just the hyperlink escapes (not general
+// ANSI, since display itself may carry none) must reproduce the input.
+func TestHyperlinkRoundTripsDisplayText(t *testing.T) {
+	for _, display := range []string{"repo", "issues page", "a URL with spaces in it"} {
+		wrapped := hyperlink(display, "https://example.com")
+		stripped := strings.ReplaceAll(wrapped, "\x1b]8;;https://example.com\x1b\\", "")
+		stripped = strings.ReplaceAll(stripped, "\x1b]8;;\x1b\\", "")
+		if stripped != display {
+			t.Errorf("hyperlink(%q, ...) round-trip = %q, want %q", display, stripped, display)
+		}
+	}
+}
+
+// TestHyperlinkPreservesNestedANSIStyling asserts wrapping an already-styled
+// display string in OSC 8 doesn't disturb its SGR codes — the OSC 8 escapes
+// simply bracket the styled text.
+func TestHyperlinkPreservesNestedANSIStyling(t *testing.T) {
+	styled := "\x1b[4;38;5;245mrepo      https://example.com\x1b[0m"
+	got := hyperlink(styled, "https://example.com")
+	if !strings.Contains(got, styled) {
+		t.Fatalf("hyperlink() should preserve the nested styled text intact, got %q", got)
+	}
+	if !strings.HasPrefix(got, "\x1b]8;;https://example.com\x1b\\") {
+		t.Errorf("hyperlink() should start with the OSC 8 open marker, got %q", got)
+	}
+	if !strings.HasSuffix(got, "\x1b]8;;\x1b\\") {
+		t.Errorf("hyperlink() should end with the OSC 8 close marker, got %q", got)
+	}
+}
+
+// TestHyperlinkEmptyURLIsNoop mirrors the F4 call site's safety: an empty URL
+// (which should never actually reach hyperlink in practice) degrades to the
+// plain display text rather than emitting a broken escape sequence.
+func TestHyperlinkEmptyURLIsNoop(t *testing.T) {
+	if got := hyperlink("text", ""); got != "text" {
+		t.Fatalf("hyperlink(text, \"\") = %q, want %q", got, "text")
+	}
+}
+
 func TestTruncateRespectsDisplayWidth(t *testing.T) {
 	cases := []struct {
 		s   string

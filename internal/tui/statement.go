@@ -124,6 +124,73 @@ func clampLines(s string, width int) string {
 // mdImageRe matches a Markdown image: group 1 = alt text, group 2 = URL.
 var mdImageRe = regexp.MustCompile(`!\[([^\]]*)\]\(([^)\s]+)[^)]*\)`)
 
+// bareURLRe matches a bare http(s) URL in already glamour-rendered ANSI text.
+// It deliberately excludes whitespace *and* ESC (\x1b) from the run: glamour
+// often prints a style-reset code directly after a link's URL with no
+// separating space (see LinkElement.Render in glamour/ansi/link.go), and \S+
+// would otherwise swallow that escape sequence into the "URL" match.
+var bareURLRe = regexp.MustCompile(`https?://[^\s\x1b]+`)
+
+// urlTrailingPunct is punctuation a greedy URL match often absorbs from the
+// surrounding sentence or markdown rather than the URL itself — a
+// sentence-ending period, a quote closing a blockquote, etc. Left outside the
+// hyperlink wrap. Brackets/parens are handled separately by
+// urlBracketPairs below, since — unlike this flat set — whether one belongs
+// to the URL depends on whether it's balanced.
+const urlTrailingPunct = ".,;:!?\"'"
+
+// urlBracketPairs are the trailing closing brackets splitTrailingURLPunct
+// treats specially: a trailing closer is peeled off only when it ISN'T
+// balanced by an opener earlier in the same match, so a URL that
+// legitimately ends in a balanced pair (e.g. a Wikipedia-style
+// ".../Rust_(programming_language)") keeps its own closing paren, while one
+// genuinely absorbed from the surrounding markdown/sentence (e.g. "(see
+// https://example.com)") still gets stripped.
+var urlBracketPairs = map[byte]byte{')': '(', ']': '[', '}': '{'}
+
+// splitTrailingURLPunct peels urlTrailingPunct runes, and unbalanced trailing
+// brackets, off the end of u.
+func splitTrailingURLPunct(u string) (core, trail string) {
+	end := len(u)
+	for end > 0 {
+		c := u[end-1]
+		if open, isCloser := urlBracketPairs[c]; isCloser {
+			// u[:end] still includes c itself here. If opens are already
+			// >= closes without it, c has no unmatched opener to pair with
+			// — it's not part of the URL, strip it. Otherwise it closes a
+			// real opener inside the URL — keep it.
+			if strings.Count(u[:end], string(open)) >= strings.Count(u[:end], string(c)) {
+				break
+			}
+			end--
+			continue
+		}
+		if !strings.ContainsRune(urlTrailingPunct, rune(c)) {
+			break
+		}
+		end--
+	}
+	return u[:end], u[end:]
+}
+
+// linkifyURLs finds bare URLs in fully-rendered (post-glamour) ANSI text and
+// wraps each in an OSC 8 hyperlink (see hyperlink in render.go) so
+// Cmd/Ctrl-click opens them in supporting terminals. It's meant to run as the
+// very last step on a finished render — the regex naturally steps over ANSI
+// escape sequences (they don't look like a URL) rather than fighting
+// glamour's own link styling, whether the URL came from a bare link in the
+// source markdown or is the visible href glamour prints beside a
+// [text](url) link (see LinkElement.Render).
+func linkifyURLs(s string) string {
+	return bareURLRe.ReplaceAllStringFunc(s, func(u string) string {
+		core, trail := splitTrailingURLPunct(u)
+		if core == "" {
+			return u
+		}
+		return hyperlink(core, core) + trail
+	})
+}
+
 // statementImages holds decoded statement images keyed by URL and the terminal
 // protocol to render them with.
 type statementImages struct {
@@ -166,7 +233,7 @@ func renderStatementMD(r *glamour.TermRenderer, md string, contentWidth int, img
 
 	locs := mdImageRe.FindAllStringSubmatchIndex(md, -1)
 	if len(locs) == 0 {
-		return clampLines(render(md), contentWidth), ""
+		return linkifyURLs(clampLines(render(md), contentWidth)), ""
 	}
 
 	inline := imgs != nil && imgs.proto != termimg.ProtoNone
@@ -217,5 +284,5 @@ func renderStatementMD(r *glamour.TermRenderer, md string, contentWidth int, img
 	if seg := md[last:]; strings.TrimSpace(seg) != "" {
 		b.WriteString(render(seg))
 	}
-	return b.String(), pfx.String()
+	return linkifyURLs(b.String()), pfx.String()
 }

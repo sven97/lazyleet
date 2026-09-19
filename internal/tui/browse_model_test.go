@@ -423,7 +423,7 @@ func TestStatusDetailBodyShowsAccountSyncsAndDaily(t *testing.T) {
 		Difficulty: "Medium", Done: true, Streak: 3,
 	}})
 
-	body := m.statusDetailBody()
+	body := m.statusDetailBody(m.previewVP.Width)
 	for _, want := range []string{
 		"Account", "sven",
 		"Catalog", "1d ago", // full-catalog freshness
@@ -503,7 +503,7 @@ func TestBrowseFooterOmitsSyncAgeWhenStatusPaneVisible(t *testing.T) {
 
 func TestStatusDetailBodyAnonymous(t *testing.T) {
 	m, _ := bootBrowse(t) // anonymous
-	body := m.statusDetailBody()
+	body := m.statusDetailBody(m.previewVP.Width)
 	if !strings.Contains(body, "run `lazyleet auth`") {
 		t.Errorf("anonymous status should prompt to sign in:\n%s", body)
 	}

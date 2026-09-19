@@ -79,9 +79,13 @@ type BrowseModel struct {
 	filtering bool
 	filter    textinput.Model
 
-	previewSlug        string
-	previewMD          string
-	previewVP          viewport.Model
+	previewSlug string
+	previewMD   string
+	previewVP   viewport.Model
+	// detailSel is an in-progress or just-finished click-drag text selection
+	// (F1) over the Detail pane's body — see selection.go. Cleared whenever
+	// the pane's content or geometry changes under it.
+	detailSel          selectionState
 	previewErr         error
 	previewLoading     bool
 	previewImages      *statementImages
@@ -101,6 +105,11 @@ type BrowseModel struct {
 	imgDir     string
 	imgWriter  *ImageWriter
 	imgWritten string
+
+	// version is main.versionString(), plumbed in via SetVersion so the
+	// package-main-only build info can appear in the Status/About panel
+	// without internal/tui importing cmd/lazyleet.
+	version string
 
 	auth AuthState
 
@@ -328,6 +337,7 @@ func (m *BrowseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
+		m.detailSel.clear() // pane geometry is about to change under it
 		if m.topicPicker != nil {
 			m.topicPicker.search.Width = max(1, m.width-18)
 		}
@@ -483,6 +493,7 @@ func (m *BrowseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.renderCache[msg.key] = previewEntry{content: msg.content, prefix: msg.prefix}
 		if msg.key == m.previewKey() && !m.detailShowsStatus {
 			m.previewVP.SetContent(msg.content)
+			m.detailSel.clear()
 			m.previewVP.GotoTop()
 			m.previewRenderedKey = msg.key
 			m.previewContentSlug = m.previewSlug
@@ -538,7 +549,7 @@ func (m *BrowseModel) regionAt(x, y int) (Region, bool) {
 
 // listRowAt maps a terminal row to a filtered-list index, or -1.
 func (m *BrowseModel) listRowAt(my int) int {
-	top := m.layout.List.Y + 2 // border + title
+	top := m.layout.List.Y + 1 // border (the title lives in the border row now)
 	if m.filtering {
 		top++ // filter input line
 	}
@@ -564,7 +575,7 @@ func (m *BrowseModel) sourceRowAt(my int) int {
 	}
 	// Body layout: 0 "PROBLEMS", 1 All Problems, 2 Daily Question, 3 blank,
 	// 4 "STUDY PLANS", 5 plan[0], 6 plan[1], … → plan[k] at line 3+k (k>=2).
-	body := my - (m.layout.Sources.Y + 2) // border + title
+	body := my - (m.layout.Sources.Y + 1) // border (the title lives in the border row now)
 	if body < 0 {
 		return -1
 	}
@@ -586,6 +597,25 @@ func (m *BrowseModel) sourceRowAt(my int) int {
 }
 
 func (m *BrowseModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	// A drag already in progress: route its motion/release to the Detail pane
+	// it started in regardless of which region the cursor is over now
+	// (dragging past the pane's border still extends the selection, matching
+	// normal terminal drag-select) rather than re-resolving regionAt below.
+	// Any other action (in practice, a stray press with no matching release —
+	// mouse protocols always pair the two for a real drag) falls through to
+	// normal click dispatch instead of being swallowed; begin()/relayout()
+	// below reset detailSel.active cleanly either way.
+	//
+	// Deliberately checked BEFORE the filtering/help/topicPicker guard below:
+	// a drag can start on the Detail pane and then have an overlay opened
+	// over it via the keyboard (e.g. `?` or `/`) before the button is
+	// released. If the release were swallowed by that guard instead,
+	// detailSel.active would be left stuck true with no way to finish or
+	// clear it until the next click — this lets an in-flight drag always
+	// reach its release, regardless of what opened in the meantime.
+	if m.detailSel.active && (msg.Action == tea.MouseActionMotion || msg.Action == tea.MouseActionRelease) {
+		return m.continueDetailSelection(msg)
+	}
 	if m.filtering || m.showHelp || m.topicPicker != nil {
 		return m, nil
 	}
@@ -615,6 +645,7 @@ func (m *BrowseModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 				m.srcCursor++
 			}
 		case RegionDetail:
+			m.detailSel.clear()
 			if up {
 				m.previewVP.ScrollUp(wheelScrollLines)
 			} else {
@@ -652,8 +683,49 @@ func (m *BrowseModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			m.srcCursor = idx
 			cmd = tea.Batch(cmd, m.activateSource(idx))
 		}
+	case RegionDetail:
+		if lx, ly, ok := localCell(msg.X, msg.Y, m.layout.Detail); ok {
+			m.detailSel.begin(lx, ly)
+		}
 	}
 	return m, cmd
+}
+
+// continueDetailSelection routes an in-progress Detail-pane drag's motion and
+// release events (see handleMouse) — coordinates are clamped to the pane's
+// body rather than re-validated, so dragging past the border still extends
+// the selection instead of freezing it.
+func (m *BrowseModel) continueDetailSelection(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	lx, ly := clampCell(msg.X, msg.Y, m.layout.Detail)
+	if msg.Action == tea.MouseActionRelease {
+		m.detailSel.end(lx, ly)
+		m.copyDetailSelection()
+		return m, nil
+	}
+	m.detailSel.extend(lx, ly)
+	return m, nil
+}
+
+// copyDetailSelection finalizes a finished Detail-pane selection: copies its
+// plain text to the system clipboard via OSC 52 and leaves a one-line
+// confirmation in the status bar. A no-op for a plain click (no drag) — see
+// selectionState.end.
+func (m *BrowseModel) copyDetailSelection() {
+	if !m.detailSel.hasSelection {
+		return
+	}
+	text := selectedText(strings.Split(m.previewVP.View(), "\n"), m.detailSel)
+	m.copyText(text)
+}
+
+// copyText writes text to the system clipboard (OSC 52, via the same
+// *ImageWriter already wired in for out-of-band escape injection — see
+// imgwriter.go) and leaves a one-line status-bar confirmation, reusing the
+// same statusMsg mechanism run/submit/sync results already report through.
+func (m *BrowseModel) copyText(text string) {
+	if msg := copyToClipboard(m.imgWriter, text); msg != "" {
+		m.statusMsg = msg
+	}
 }
 
 func (m *BrowseModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -740,6 +812,23 @@ func (m *BrowseModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.fltTags = nil
 		m.fltDiff, m.fltStatus, m.fltHidePaid, m.sortMode = "", "", false, sortByID
 		return m.afterListChange()
+	}
+
+	// F2 digit-jump: 1-4 focus Status/Sources/Problems/Detail straight away,
+	// from any pane, mirroring lazygit's numbered panels. Gated on !showHelp
+	// like the other modal/overlay guards above (topicPicker and filtering
+	// already returned earlier in this function); guarded against an empty
+	// rect so a still-narrow layout switches the visible pane rather than
+	// no-oping (in practice ComputeBrowse never actually produces an empty
+	// rect for any region — Single mode gives every region the full work
+	// area — but this keeps the guard meaningful if that ever changes).
+	if !m.showHelp {
+		if n, ok := digitKey(msg); ok {
+			if reg, ok := regionForNumber(n); ok && !m.layout.RectFor(reg).Empty() {
+				m.setFocus(reg)
+				return m, m.refreshDetail()
+			}
+		}
 	}
 
 	switch m.focus {
@@ -949,13 +1038,26 @@ func (m *BrowseModel) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m *BrowseModel) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, m.keys.Up):
+		m.detailSel.clear()
 		m.previewVP.ScrollUp(2)
 	case key.Matches(msg, m.keys.Down):
+		m.detailSel.clear()
 		m.previewVP.ScrollDown(2)
 	case key.Matches(msg, m.keys.PageUp):
+		m.detailSel.clear()
 		m.previewVP.PageUp()
 	case key.Matches(msg, m.keys.PageDown):
+		m.detailSel.clear()
 		m.previewVP.PageDown()
+	case key.Matches(msg, m.keys.Copy):
+		// F1 keyboard fallback: copy the whole pane's visible content when
+		// there's no active drag selection to copy instead (e.g. terminals
+		// without OSC 52 support).
+		if m.detailSel.hasSelection {
+			m.copyDetailSelection()
+		} else {
+			m.copyText(plainViewportText(m.previewVP.View()))
+		}
 	}
 	return m, nil
 }
@@ -1066,9 +1168,10 @@ func (m *BrowseModel) currentRow() (BrowseRow, bool) {
 }
 
 func (m *BrowseModel) listRows() int {
-	// The frame eats border(2) + title(1); the list body prints its own
-	// column-header line. What's left is data rows.
-	h := m.layout.List.H - 3 - 1
+	// The frame eats border(2) — the title lives in the border row now, not
+	// a separate line; the list body prints its own column-header line.
+	// What's left is data rows.
+	h := m.layout.List.H - 2 - 1
 	if h < 1 {
 		return 1
 	}
@@ -1197,9 +1300,10 @@ func (m *BrowseModel) setFocus(reg Region) {
 // pane's expanded info when it is focused, otherwise the problem statement.
 func (m *BrowseModel) refreshDetail() tea.Cmd {
 	if m.detailShowsStatus {
-		body := m.statusDetailBody()
+		body := m.statusDetailBody(m.previewVP.Width)
 		if body != m.previewRenderedBody {
 			m.previewVP.SetContent(body)
+			m.detailSel.clear()
 			m.previewVP.GotoTop()
 			m.previewRenderedBody = body
 		}
@@ -1214,6 +1318,13 @@ func (m *BrowseModel) EnableImages(proto termimg.Protocol, cacheDir string, iw *
 	m.imgProto = proto
 	m.imgDir = cacheDir
 	m.imgWriter = iw
+}
+
+// SetVersion supplies the build's version string (main.versionString()) for
+// display in the Status/About panel. Optional: an unset version simply omits
+// that line.
+func (m *BrowseModel) SetVersion(v string) {
+	m.version = v
 }
 
 type previewEntry struct {
@@ -1245,6 +1356,7 @@ func (m *BrowseModel) refreshPreviewContent() tea.Cmd {
 	if e, ok := m.renderCache[key]; ok {
 		if key != m.previewRenderedKey {
 			m.previewVP.SetContent(e.content)
+			m.detailSel.clear()
 			m.previewVP.GotoTop()
 			m.previewRenderedKey = key
 		}

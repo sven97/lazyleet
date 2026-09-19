@@ -28,17 +28,14 @@ func (m *BrowseModel) View() (out string) {
 	var body string
 	if m.layout.Single {
 		r := m.layout.RectFor(m.focus)
-		body = m.frame(m.regionTitle(m.focus), true, r, m.regionBody(m.focus, innerW(r)))
+		body = m.frame(m.focus, r, m.regionBody(m.focus, innerW(r)))
 	} else {
 		left := lipgloss.JoinVertical(lipgloss.Left,
-			m.frame("Status", m.focus == RegionStatus, m.layout.Status,
-				m.statusPaneBody(innerW(m.layout.Status))),
-			m.frame("Sources", m.focus == RegionSources, m.layout.Sources,
-				m.sourcesBody(innerW(m.layout.Sources))),
-			m.frame(m.listTitle(), m.focus == RegionList, m.layout.List,
-				m.listBody(innerW(m.layout.List))),
+			m.frame(RegionStatus, m.layout.Status, m.statusPaneBody(innerW(m.layout.Status))),
+			m.frame(RegionSources, m.layout.Sources, m.sourcesBody(innerW(m.layout.Sources))),
+			m.frame(RegionList, m.layout.List, m.listBody(innerW(m.layout.List))),
 		)
-		right := m.frame(m.regionTitle(RegionDetail), m.focus == RegionDetail, m.layout.Detail, m.detailBody())
+		right := m.frame(RegionDetail, m.layout.Detail, m.detailBody())
 		body = lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 	}
 	return lipgloss.JoinVertical(lipgloss.Left, body, m.renderStatusBar())
@@ -71,21 +68,19 @@ func (m *BrowseModel) regionBody(r Region, w int) string {
 	}
 }
 
-// frame draws a bordered pane with a title row.
-func (m *BrowseModel) frame(title string, focused bool, r Rect, body string) string {
+// frame draws a bordered pane for region r, its number and title embedded in
+// the top border (see numberedFrame in frame.go) rather than on a separate
+// line inside it.
+func (m *BrowseModel) frame(region Region, r Rect, body string) string {
 	if r.Empty() {
 		return ""
 	}
 	ts := m.th.Title
 	bs := m.th.PaneBorder
-	if focused {
+	if m.focus == region {
 		ts, bs = m.th.TitleFocused, m.th.PaneBorderFocused
 	}
-	inner := lipgloss.JoinVertical(lipgloss.Left, ts.Render(title), body)
-	// MaxWidth/MaxHeight hard-clip: a body that renders taller than its pane
-	// must never push the neighbouring panes off-screen.
-	return bs.Width(r.W - 2).Height(r.H - 2).
-		MaxWidth(r.W).MaxHeight(r.H).Render(inner)
+	return numberedFrame(bs, ts, region.Number(), ts.Render(m.regionTitle(region)), r, body)
 }
 
 func (m *BrowseModel) sourcesBody(w int) string {
@@ -120,7 +115,9 @@ func (m *BrowseModel) sourcesBody(w int) string {
 const staleSyncAfter = 24 * time.Hour
 
 // statusPaneBody is the compact 3-line summary shown in the small left-top pane
-// (its rect is brStatusH tall: border + title + 3 body lines).
+// (its rect is brStatusH tall: border(2) + 3 body lines, plus one spare row —
+// the title used to be its own line but now lives in the top border, see
+// numberedFrame in frame.go).
 func (m *BrowseModel) statusPaneBody(w int) string {
 	// The region is almost always the "com" default, so it's only worth the
 	// space when it isn't — same rule statusDetailBody uses.
@@ -188,16 +185,111 @@ func (m *BrowseModel) dailyStatusLine(w int) string {
 	return mark + " " + m.th.Muted.Render(truncate(txt, w-2))
 }
 
+// lazyleetArt is the pixel-style "lazyleet" wordmark shown at the top of the
+// expanded Status/About panel (Detail pane, RegionStatus focused), in the
+// spirit of lazygit's own About screen. Plain ASCII, no external asset — see
+// statusHeaderBlock for the narrow-pane fallback.
+const lazyleetArt = `#     ##  #### #  # #    #### #### ####
+#    #  #    # #  # #    #    #     #
+#    ####   #   ##  #    ###  ###   #
+#    #  #  #     #  #    #    #     #
+#### #  # ####   #  #### #### ####  #`
+
+// lazyleetArtWidth is lazyleetArt's rendered width in terminal columns,
+// computed from the art itself so a future tweak to the glyphs can't
+// silently desync statusHeaderBlock's narrow-pane fallback threshold.
+// lipgloss.Width already returns a multi-line string's widest line.
+var lazyleetArtWidth = lipgloss.Width(lazyleetArt)
+
+// lazyleetRepoURL and friends are the reference links shown in the
+// Status/About panel — only ones that actually resolve for this repo.
+const (
+	lazyleetRepoURL     = "https://github.com/sven97/lazyleet"
+	lazyleetIssuesURL   = lazyleetRepoURL + "/issues"
+	lazyleetReleasesURL = lazyleetRepoURL + "/releases"
+)
+
 // statusDetailBody is the expanded info shown in the Detail pane while the
-// Status pane is focused: who you are, how fresh the two caches are (the full
-// problem catalog and your own solve status), and today's daily challenge.
-func (m *BrowseModel) statusDetailBody() string {
+// Status pane is focused: a wordmark header + version + reference links,
+// then who you are, how fresh the two caches are (the full problem catalog
+// and your own solve status), and today's daily challenge. w is the Detail
+// pane's inner (post-border) width, used only to decide whether the ASCII-art
+// header fits.
+func (m *BrowseModel) statusDetailBody(w int) string {
+	var b strings.Builder
+	b.WriteString(m.statusHeaderBlock(w))
+	b.WriteString(m.statusDivider(w))
+	b.WriteString(m.statusLiveBlock())
+	return b.String()
+}
+
+// statusHeaderBlock renders the wordmark (or its narrow-pane fallback),
+// version line, and reference links block.
+func (m *BrowseModel) statusHeaderBlock(w int) string {
+	th := m.th
+	var b strings.Builder
+
+	if w >= lazyleetArtWidth {
+		// Style each line individually rather than the whole multi-line block:
+		// lipgloss.Style.Render pads every line of a styled multi-line string
+		// out to the widest line (its horizontal-align pass), which would
+		// otherwise inflate the art with trailing spaces it wasn't drawn with.
+		for _, line := range strings.Split(lazyleetArt, "\n") {
+			b.WriteString(th.Title.Render(line) + "\n")
+		}
+	} else {
+		// Too narrow for the art to render legibly — a plain bold wordmark
+		// line still identifies the panel.
+		b.WriteString(th.Title.Render("lazyleet") + "\n")
+	}
+	if m.version != "" {
+		b.WriteString(th.Muted.Render(truncate(m.version, w)) + "\n")
+	}
+
+	b.WriteString("\n")
+	link := th.Muted.Underline(true)
+	// OSC 8 (see hyperlink in render.go) makes these Cmd/Ctrl-clickable in
+	// supporting terminals; unsupported terminals just show the styled text.
+	//
+	// The *displayed* text is truncated to w like every other width-bound
+	// line in this file — the links (up to 53 cols for "releases") are wider
+	// than lazyleetArtWidth (39 cols), so a pane that's wide enough for the
+	// art (e.g. an 80-col terminal's default ~48-col Detail pane) can still
+	// be too narrow for the full URLs; without this they'd get silently
+	// hard-cut by the viewport with no ellipsis. The hyperlink *target*
+	// (lazyleetRepoURL etc.) is always passed in full, untruncated — only
+	// what's shown on screen should ever be cut, never the href itself.
+	b.WriteString(hyperlink(link.Render(truncate("repo      "+lazyleetRepoURL, w)), lazyleetRepoURL) + "\n")
+	b.WriteString(hyperlink(link.Render(truncate("issues    "+lazyleetIssuesURL, w)), lazyleetIssuesURL) + "\n")
+	b.WriteString(hyperlink(link.Render(truncate("releases  "+lazyleetReleasesURL, w)), lazyleetReleasesURL) + "\n")
+
+	return b.String()
+}
+
+// statusDivider is the subtle rule separating the header/links block above
+// from the live Account/Catalog/Progress/Daily sections below.
+func (m *BrowseModel) statusDivider(w int) string {
+	n := w
+	if n < 8 {
+		n = 8
+	}
+	if n > 60 {
+		n = 60
+	}
+	return m.th.Muted.Render(strings.Repeat("─", n)) + "\n"
+}
+
+// statusLiveBlock renders the Account/Catalog/Progress/Daily sections — same
+// data and edge cases (anonymous/unsynced/stale/loading/error) as before this
+// panel's visual reorganization, just grouped under statusDetailBody's new
+// header instead of starting the pane.
+func (m *BrowseModel) statusLiveBlock() string {
 	th := m.th
 	var b strings.Builder
 	row := func(k, v string) { b.WriteString("  " + fmt.Sprintf("%-11s", k) + v + "\n") }
 	section := func(name string) { b.WriteString("\n" + th.Title.Render(name) + "\n") }
 
-	b.WriteString(th.Title.Render("Account") + "\n")
+	section("Account")
 	switch {
 	case !m.auth.Authed:
 		row("user", th.Muted.Render("anonymous — run `lazyleet auth`"))
@@ -421,7 +513,8 @@ func (m *BrowseModel) detailTitle() string {
 
 func (m *BrowseModel) detailBody() string {
 	if m.detailShowsStatus {
-		return m.previewVP.View() // holds statusDetailBody, set by refreshDetail
+		// holds statusDetailBody, set by refreshDetail
+		return applySelectionHighlight(m.previewVP.View(), m.detailSel, m.th.Selection)
 	}
 	// The viewport still holds the previously shown statement until the new
 	// one is fetched and rendered; don't show stale content for the wrong row.
@@ -432,7 +525,7 @@ func (m *BrowseModel) detailBody() string {
 	case m.previewLoading || stale:
 		return m.th.Spinner.Render(m.spin.View()) + " loading statement…"
 	default:
-		return m.previewVP.View()
+		return applySelectionHighlight(m.previewVP.View(), m.detailSel, m.th.Selection)
 	}
 }
 
@@ -470,7 +563,7 @@ func (m *BrowseModel) renderStatusBar() string {
 	}
 
 	var segs []string
-	for _, h := range m.keys.shortcutHints(m.filtering) {
+	for _, h := range m.keys.shortcutHints(m.filtering, m.focus) {
 		segs = append(segs, m.th.StatusKey.Render(h.key)+m.th.StatusBar.Render(" "+h.desc))
 	}
 	hints := strings.Join(segs, m.th.StatusDivider.Render(" │ "))
@@ -483,6 +576,7 @@ func (m *BrowseModel) renderHelp() string {
 	pairs := [][2]string{
 		{"↑/k ↓/j", "move"}, {"g / G", "top / bottom"}, {"ctrl+u / ctrl+d", "page"},
 		{"tab / ⇧tab", "cycle panes"}, {"h / l", "prev / next pane"},
+		{"1-4", "jump straight to Status / Sources / Problems / Detail"},
 		{"enter", "open workspace (or apply a source)"},
 		{"/", "fuzzy filter"}, {"esc", "clear fuzzy filter / close help"},
 		{"d", "cycle difficulty filter (Easy → Medium → Hard → all)"},
@@ -492,6 +586,8 @@ func (m *BrowseModel) renderHelp() string {
 		{"c", "clear all filters + sort"},
 		{"s", "sync problem cache from LeetCode"},
 		{"t", "filter by topic tags (match all selected)"},
+		{"click+drag", "select text in the Detail pane (copies on release)"},
+		{"y", "copy Detail pane's selection, or all of it if none"},
 		{"z", "zoom the focused pane"}, {"?", "toggle this help"}, {"q", "quit"},
 	}
 	var b strings.Builder

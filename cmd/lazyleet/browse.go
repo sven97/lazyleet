@@ -20,6 +20,7 @@ func runBrowse(app *appContext) error {
 	defer data.Close()
 
 	bm := tui.NewBrowseModel(data)
+	bm.SetVersion(versionString())
 	factory := func(slug string) (*tui.WorkspaceModel, error) {
 		return app.buildWorkspaceModel(context.Background(), slug, "", false)
 	}

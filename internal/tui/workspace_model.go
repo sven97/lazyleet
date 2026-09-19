@@ -46,6 +46,15 @@ type WorkspaceModel struct {
 	code      viewport.Model
 	results   viewport.Model
 
+	// sel is an in-progress or just-finished click-drag text selection (F1)
+	// over whichever of Statement/Code/Results it started in (selPane) — see
+	// selection.go. hintsSel is the analogous state for the Hints overlay
+	// (hints.go), kept separate since it isn't one of the three numbered
+	// panes and has its own (border-less) screen geometry.
+	sel      selectionState
+	selPane  Pane
+	hintsSel selectionState
+
 	stmtRenderer *glamour.TermRenderer
 	stmtWidth    int
 	stmtImages   *statementImages
@@ -635,24 +644,58 @@ func (m *WorkspaceModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.loadHistory()
 	case key.Matches(msg, m.keys.Tests):
 		return m.openCaseManager()
+	case key.Matches(msg, m.keys.Copy):
+		// F1 keyboard fallback: copy the whole focused pane's visible content
+		// when there's no active drag selection to copy instead (e.g.
+		// terminals without OSC 52 support).
+		if m.sel.hasSelection && m.selPane == m.focused {
+			m.copySelection()
+		} else {
+			m.copyText(plainViewportText(m.focusedViewport().View()))
+		}
+		return m, nil
 	case key.Matches(msg, m.keys.Up):
+		m.sel.clear()
 		m.focusedViewport().ScrollUp(2)
 		return m, nil
 	case key.Matches(msg, m.keys.Down):
+		m.sel.clear()
 		m.focusedViewport().ScrollDown(2)
 		return m, nil
 	case key.Matches(msg, m.keys.PageUp):
+		m.sel.clear()
 		m.focusedViewport().PageUp()
 		return m, nil
 	case key.Matches(msg, m.keys.PageDown):
+		m.sel.clear()
 		m.focusedViewport().PageDown()
 		return m, nil
 	case key.Matches(msg, m.keys.Top):
+		m.sel.clear()
 		m.focusedViewport().GotoTop()
 		return m, nil
 	case key.Matches(msg, m.keys.Bottom):
+		m.sel.clear()
 		m.focusedViewport().GotoBottom()
 		return m, nil
+	}
+
+	// F2 digit-jump: 1-3 focus Statement/Code/Results straight away, from any
+	// pane, mirroring lazygit's numbered panels. While zoomed/tabbed this
+	// switches *which* pane is zoomed (m.mode is left untouched) rather than
+	// no-opping or exiting zoom, matching lazygit's own screen-mode behavior.
+	// Gated on !showHelp like the other modal guards above; the rect-empty
+	// guard mirrors browse's equivalent (see browse_model.go) — in practice
+	// Compute() never actually leaves a pane's rect empty (tabbed mode gives
+	// every pane the full work area) but the check stays meaningful either way.
+	if !m.showHelp {
+		if n, ok := digitKey(msg); ok {
+			if p, ok := paneForNumber(n); ok && !m.layout.RectFor(p).Empty() {
+				m.focused = p
+				m.relayout()
+				return m, nil
+			}
+		}
 	}
 	return m, nil
 }
@@ -733,10 +776,29 @@ func (m *WorkspaceModel) wheelAtEdge(msg tea.MouseMsg) bool {
 }
 
 func (m *WorkspaceModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	// A drag already in progress on one of the three numbered panes: route
+	// its motion/release to the pane it started in regardless of which pane
+	// the cursor is over now (dragging past a pane's edge still extends the
+	// selection, matching normal terminal drag-select) rather than
+	// re-resolving paneAt below. Any other action (in practice, a stray
+	// press with no matching release — mouse protocols always pair the two
+	// for a real drag) falls through to normal click dispatch instead of
+	// being swallowed; begin()/relayout() below reset sel.active cleanly
+	// either way.
+	//
+	// Deliberately checked BEFORE the showHints/showHistory/cases overlay
+	// guards below: a drag can start on a numbered pane and then have an
+	// overlay opened over it via the keyboard (H, a, t) before the button is
+	// released. If the release were swallowed by one of those guards
+	// instead, sel.active would be left stuck true with no way to finish or
+	// clear it until the next click — this lets an in-flight drag always
+	// reach its release, regardless of what opened in the meantime.
+	if m.sel.active && (msg.Action == tea.MouseActionMotion || msg.Action == tea.MouseActionRelease) {
+		return m.continueSelection(msg)
+	}
+
 	if m.showHints {
-		var cmd tea.Cmd
-		m.hints, cmd = m.hints.Update(msg)
-		return m, cmd
+		return m.handleHintsMouse(msg)
 	}
 	if m.showHistory {
 		if m.historyDetail {
@@ -749,6 +811,7 @@ func (m *WorkspaceModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if m.cases != nil {
 		return m, nil
 	}
+
 	p, ok := m.paneAt(msg.X, msg.Y)
 	if !ok {
 		return m, nil
@@ -758,8 +821,10 @@ func (m *WorkspaceModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		// Only vertical wheel scrolls; ignore trackpad WheelLeft/Right noise.
 		switch msg.Button {
 		case tea.MouseButtonWheelUp:
+			m.sel.clear()
 			m.paneViewport(p).ScrollUp(wheelScrollLines)
 		case tea.MouseButtonWheelDown:
+			m.sel.clear()
 			m.paneViewport(p).ScrollDown(wheelScrollLines)
 		}
 	case msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft:
@@ -767,14 +832,57 @@ func (m *WorkspaceModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			m.focused = p
 			m.relayout()
 		}
+		if lx, ly, ok := localCell(msg.X, msg.Y, m.layout.RectFor(p)); ok {
+			m.selPane = p
+			m.sel.begin(lx, ly)
+		}
 	}
 	return m, nil
+}
+
+// continueSelection routes an in-progress drag's motion and release events
+// (see handleMouse) to the pane it started in (selPane) — coordinates are
+// clamped to that pane's body rather than re-validated, so dragging past the
+// border still extends the selection instead of freezing it.
+func (m *WorkspaceModel) continueSelection(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	r := m.layout.RectFor(m.selPane)
+	lx, ly := clampCell(msg.X, msg.Y, r)
+	if msg.Action == tea.MouseActionRelease {
+		m.sel.end(lx, ly)
+		m.copySelection()
+		return m, nil
+	}
+	m.sel.extend(lx, ly)
+	return m, nil
+}
+
+// copySelection finalizes a finished selection over selPane: copies its
+// plain text to the system clipboard via OSC 52 and leaves a one-line
+// confirmation in the status bar. A no-op for a plain click (no drag) — see
+// selectionState.end.
+func (m *WorkspaceModel) copySelection() {
+	if !m.sel.hasSelection {
+		return
+	}
+	vp := m.paneViewport(m.selPane)
+	m.copyText(selectedText(strings.Split(vp.View(), "\n"), m.sel))
+}
+
+// copyText writes text to the system clipboard (OSC 52, via the same
+// *ImageWriter already wired in for out-of-band escape injection — see
+// imgwriter.go) and leaves a one-line status-bar confirmation, reusing the
+// same statusMsg mechanism run/submit/sync results already report through.
+func (m *WorkspaceModel) copyText(text string) {
+	if msg := copyToClipboard(m.imgWriter, text); msg != "" {
+		m.statusMsg = msg
+	}
 }
 
 func (m *WorkspaceModel) relayout() {
 	if m.width == 0 || m.height == 0 {
 		return
 	}
+	m.sel.clear() // pane geometry is about to change under it
 	m.layout = Compute(m.width, m.height, m.focused, m.mode)
 
 	set := func(vp *viewport.Model, r Rect) {
@@ -799,10 +907,12 @@ func (m *WorkspaceModel) relayout() {
 	m.refreshResults()
 }
 
-// innerSize is the content area inside a pane's border and title row.
+// innerSize is the content area inside a pane's border — the title lives in
+// the top border row now (see numberedFrame in frame.go), not a separate
+// line, so there's nothing else to subtract.
 func innerSize(r Rect) (w, h int) {
 	w = r.W - 2 // border
-	h = r.H - 3 // border (2) + title row (1)
+	h = r.H - 2 // border
 	if w < 1 {
 		w = 1
 	}
@@ -831,6 +941,9 @@ func (m *WorkspaceModel) refreshStatement() {
 	}, w)
 	body, prefix := renderStatementMD(m.stmtRenderer, m.q.Statement, w, m.stmtImages)
 	m.statement.SetContent(strings.TrimRight(header+body, "\n"))
+	if m.selPane == PaneStatement {
+		m.sel.clear()
+	}
 	m.imgWritten = queueImagePrefix(m.imgWriter, prefix, m.imgWritten)
 }
 
@@ -839,6 +952,9 @@ func (m *WorkspaceModel) refreshCode() {
 		return
 	}
 	m.code.SetContent(gutter(highlightCode(m.codeSrc, m.ws.Lang), m.th.Muted))
+	if m.selPane == PaneCode {
+		m.sel.clear()
+	}
 }
 
 func (m *WorkspaceModel) refreshResults() {
@@ -852,6 +968,9 @@ func (m *WorkspaceModel) refreshResults() {
 		body = renderResults(m.th, m.lastRun, m.lastErr, m.running, m.spin.View(), m.results.Width)
 	}
 	m.results.SetContent(body)
+	if m.selPane == PaneResults {
+		m.sel.clear()
+	}
 }
 
 // codeChangedSinceRun reports whether the solution or managed test cases have
@@ -907,6 +1026,12 @@ func (m *WorkspaceModel) View() (out string) {
 	return lipgloss.JoinVertical(lipgloss.Left, body, m.renderStatusBar())
 }
 
+// renderPane draws one bordered pane. In the normal (two-column) layout that
+// means numberedFrame's usual "[N]-Title" top border. In the tabbed layout
+// (narrow terminal or zoom — only one pane is ever visible) the top border
+// instead carries a strip naming every pane, the focused one bracketed, via
+// tabStripContent — that's the only way to still see the other two panes'
+// numbers to jump to.
 func (m *WorkspaceModel) renderPane(p Pane, r Rect, focused bool) string {
 	if r.Empty() {
 		return ""
@@ -921,34 +1046,49 @@ func (m *WorkspaceModel) renderPane(p Pane, r Rect, focused bool) string {
 		vp = m.code
 	}
 
-	title := m.paneTitle(p, focused)
-	inner := lipgloss.JoinVertical(lipgloss.Left, title, vp.View())
-
-	border := m.th.PaneBorder
+	border, title := m.th.PaneBorder, m.th.Title
 	if focused {
-		border = m.th.PaneBorderFocused
+		border, title = m.th.PaneBorderFocused, m.th.TitleFocused
 	}
-	return border.Width(r.W - 2).Height(r.H - 2).Render(inner)
+
+	body := vp.View()
+	if p == m.selPane {
+		body = applySelectionHighlight(body, m.sel, m.th.Selection)
+	}
+
+	if m.layout.Tabbed {
+		bd := border.GetBorderStyle()
+		top := borderContentRow(bd.TopLeft, bd.Top, bd.TopRight, lineStyle(border, true), m.tabStripContent(), r.W)
+		bottom := borderContentRow(bd.BottomLeft, bd.Bottom, bd.BottomRight, lineStyle(border, false), "", r.W)
+		return joinFrame(border, top, bottom, r, body)
+	}
+	return numberedFrame(border, title, p.Number(), m.paneTitleText(p, title), r, body)
 }
 
-func (m *WorkspaceModel) paneTitle(p Pane, focused bool) string {
-	ts := m.th.Title
-	if focused {
-		ts = m.th.TitleFocused
-	}
-	if m.layout.Tabbed {
-		var parts []string
-		for _, q := range []Pane{PaneStatement, PaneCode, PaneResults} {
-			label := " " + q.String() + " "
-			if q == p {
-				parts = append(parts, m.th.TitleFocused.Render("["+q.String()+"]"))
-			} else {
-				parts = append(parts, m.th.Title.Render(label))
-			}
+// tabStripContent lists every workspace pane's number and name for the top
+// border in tabbed mode, the focused one bracketed — e.g.
+// "1:Statement  [2:Code]  3:Results" — so the other two panes' digits stay
+// visible as a reminder of what pressing them (or Tab) switches to.
+func (m *WorkspaceModel) tabStripContent() string {
+	var parts []string
+	for _, q := range []Pane{PaneStatement, PaneCode, PaneResults} {
+		label := fmt.Sprintf("%d:%s", q.Number(), q.String())
+		if q == m.focused {
+			parts = append(parts, m.th.TitleFocused.Render("["+label+"]"))
+		} else {
+			parts = append(parts, m.th.Title.Render(" "+label+" "))
 		}
-		return strings.Join(parts, " ")
 	}
+	return strings.Join(parts, " ")
+}
 
+// paneTitleText builds pane p's title, styled with ts (the same Title/
+// TitleFocused the pane's number bracket uses) — the text embedded in the
+// top border to the right of "[N]" via numberedFrame. PaneCode's "unrun"
+// marker keeps its own ErrorText color rather than inheriting ts, which is
+// why this returns an already-styled string rather than plain text for
+// numberedFrame to wrap itself.
+func (m *WorkspaceModel) paneTitleText(p Pane, ts lipgloss.Style) string {
 	switch p {
 	case PaneStatement:
 		return ts.Render(problemTitle(m.q.FrontendID, m.q.Title, m.q.PaidOnly))
@@ -978,7 +1118,7 @@ func (m *WorkspaceModel) renderStatusBar() string {
 	}
 
 	var segs []string
-	for _, h := range m.keys.shortcutHints() {
+	for _, h := range m.keys.shortcutHints(m.focused) {
 		segs = append(segs, m.th.StatusKey.Render(h.key)+m.th.StatusBar.Render(" "+h.desc))
 	}
 	hints := strings.Join(segs, m.th.StatusDivider.Render(" │ "))
@@ -996,6 +1136,7 @@ func (m *WorkspaceModel) renderHelp() string {
 		{"ctrl+u / ctrl+d", "page up / down"},
 		{"g / G", "jump to top / bottom"},
 		{"tab / ⇧tab", "next / prev pane (h / l also work)"},
+		{"1-3", "jump straight to Statement / Code / Results"},
 		{"z", "zoom the focused pane"},
 		{"e", "edit in $EDITOR"},
 		{"r", "run local tests"},
@@ -1005,6 +1146,8 @@ func (m *WorkspaceModel) renderHelp() string {
 		{"t", "manage test cases (add, edit, delete)"},
 		{"H", "open hints (hidden until you reveal them)"},
 		{"a", "recent local and remote attempt history"},
+		{"click+drag", "select text in Statement/Code/Results (copies on release)"},
+		{"y", "copy the focused pane's selection, or all of it if none"},
 		{"q", "back to browse (b also works)"}, {"?", "toggle this help"},
 	}
 	var b strings.Builder
