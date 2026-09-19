@@ -20,6 +20,10 @@ type Theme struct {
 	Muted     lipgloss.Style
 	Spinner   lipgloss.Style
 	ErrorText lipgloss.Style
+	// Selection highlights a click-drag text selection (F1) over a prose
+	// pane's body. Reverse video, matching the app's existing convention for
+	// "this is picked" (the list cursor row, the active source row).
+	Selection lipgloss.Style
 }
 
 var (
@@ -50,6 +54,7 @@ func DefaultTheme() Theme {
 		Muted:             lipgloss.NewStyle().Foreground(colMuted),
 		Spinner:           lipgloss.NewStyle().Foreground(colFocus),
 		ErrorText:         lipgloss.NewStyle().Foreground(colWarnFg),
+		Selection:         lipgloss.NewStyle().Reverse(true),
 	}
 }
 

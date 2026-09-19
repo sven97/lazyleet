@@ -248,19 +248,20 @@ func (m *BrowseModel) statusHeaderBlock(w int) string {
 
 	b.WriteString("\n")
 	link := th.Muted.Underline(true)
-	// TODO(F1): once internal/tui/render.go grows hyperlink(display, url)
-	// (OSC 8), wrap each of these three lines with it so they become
-	// Cmd/Ctrl-clickable in supporting terminals.
+	// OSC 8 (see hyperlink in render.go) makes these Cmd/Ctrl-clickable in
+	// supporting terminals; unsupported terminals just show the styled text.
 	//
-	// Truncated to w like every other width-bound line in this file — the
-	// links (up to 53 cols for "releases") are wider than lazyleetArtWidth
-	// (39 cols), so a pane that's wide enough for the art (e.g. an 80-col
-	// terminal's default ~48-col Detail pane) can still be too narrow for
-	// the full URLs; without this they'd get silently hard-cut by the
-	// viewport with no ellipsis.
-	b.WriteString(link.Render(truncate("repo      "+lazyleetRepoURL, w)) + "\n")
-	b.WriteString(link.Render(truncate("issues    "+lazyleetIssuesURL, w)) + "\n")
-	b.WriteString(link.Render(truncate("releases  "+lazyleetReleasesURL, w)) + "\n")
+	// The *displayed* text is truncated to w like every other width-bound
+	// line in this file — the links (up to 53 cols for "releases") are wider
+	// than lazyleetArtWidth (39 cols), so a pane that's wide enough for the
+	// art (e.g. an 80-col terminal's default ~48-col Detail pane) can still
+	// be too narrow for the full URLs; without this they'd get silently
+	// hard-cut by the viewport with no ellipsis. The hyperlink *target*
+	// (lazyleetRepoURL etc.) is always passed in full, untruncated — only
+	// what's shown on screen should ever be cut, never the href itself.
+	b.WriteString(hyperlink(link.Render(truncate("repo      "+lazyleetRepoURL, w)), lazyleetRepoURL) + "\n")
+	b.WriteString(hyperlink(link.Render(truncate("issues    "+lazyleetIssuesURL, w)), lazyleetIssuesURL) + "\n")
+	b.WriteString(hyperlink(link.Render(truncate("releases  "+lazyleetReleasesURL, w)), lazyleetReleasesURL) + "\n")
 
 	return b.String()
 }
@@ -512,7 +513,8 @@ func (m *BrowseModel) detailTitle() string {
 
 func (m *BrowseModel) detailBody() string {
 	if m.detailShowsStatus {
-		return m.previewVP.View() // holds statusDetailBody, set by refreshDetail
+		// holds statusDetailBody, set by refreshDetail
+		return applySelectionHighlight(m.previewVP.View(), m.detailSel, m.th.Selection)
 	}
 	// The viewport still holds the previously shown statement until the new
 	// one is fetched and rendered; don't show stale content for the wrong row.
@@ -523,7 +525,7 @@ func (m *BrowseModel) detailBody() string {
 	case m.previewLoading || stale:
 		return m.th.Spinner.Render(m.spin.View()) + " loading statement…"
 	default:
-		return m.previewVP.View()
+		return applySelectionHighlight(m.previewVP.View(), m.detailSel, m.th.Selection)
 	}
 }
 
@@ -584,6 +586,8 @@ func (m *BrowseModel) renderHelp() string {
 		{"c", "clear all filters + sort"},
 		{"s", "sync problem cache from LeetCode"},
 		{"t", "filter by topic tags (match all selected)"},
+		{"click+drag", "select text in the Detail pane (copies on release)"},
+		{"y", "copy Detail pane's selection, or all of it if none"},
 		{"z", "zoom the focused pane"}, {"?", "toggle this help"}, {"q", "quit"},
 	}
 	var b strings.Builder

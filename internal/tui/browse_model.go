@@ -79,9 +79,13 @@ type BrowseModel struct {
 	filtering bool
 	filter    textinput.Model
 
-	previewSlug        string
-	previewMD          string
-	previewVP          viewport.Model
+	previewSlug string
+	previewMD   string
+	previewVP   viewport.Model
+	// detailSel is an in-progress or just-finished click-drag text selection
+	// (F1) over the Detail pane's body — see selection.go. Cleared whenever
+	// the pane's content or geometry changes under it.
+	detailSel          selectionState
 	previewErr         error
 	previewLoading     bool
 	previewImages      *statementImages
@@ -333,6 +337,7 @@ func (m *BrowseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
+		m.detailSel.clear() // pane geometry is about to change under it
 		if m.topicPicker != nil {
 			m.topicPicker.search.Width = max(1, m.width-18)
 		}
@@ -488,6 +493,7 @@ func (m *BrowseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.renderCache[msg.key] = previewEntry{content: msg.content, prefix: msg.prefix}
 		if msg.key == m.previewKey() && !m.detailShowsStatus {
 			m.previewVP.SetContent(msg.content)
+			m.detailSel.clear()
 			m.previewVP.GotoTop()
 			m.previewRenderedKey = msg.key
 			m.previewContentSlug = m.previewSlug
@@ -594,6 +600,17 @@ func (m *BrowseModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if m.filtering || m.showHelp || m.topicPicker != nil {
 		return m, nil
 	}
+	// A drag already in progress: route its motion/release to the Detail pane
+	// it started in regardless of which region the cursor is over now
+	// (dragging past the pane's border still extends the selection, matching
+	// normal terminal drag-select) rather than re-resolving regionAt below.
+	// Any other action (in practice, a stray press with no matching release —
+	// mouse protocols always pair the two for a real drag) falls through to
+	// normal click dispatch instead of being swallowed; begin()/relayout()
+	// below reset detailSel.active cleanly either way.
+	if m.detailSel.active && (msg.Action == tea.MouseActionMotion || msg.Action == tea.MouseActionRelease) {
+		return m.continueDetailSelection(msg)
+	}
 	reg, ok := m.regionAt(msg.X, msg.Y)
 	if !ok {
 		return m, nil
@@ -620,6 +637,7 @@ func (m *BrowseModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 				m.srcCursor++
 			}
 		case RegionDetail:
+			m.detailSel.clear()
 			if up {
 				m.previewVP.ScrollUp(wheelScrollLines)
 			} else {
@@ -657,8 +675,53 @@ func (m *BrowseModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			m.srcCursor = idx
 			cmd = tea.Batch(cmd, m.activateSource(idx))
 		}
+	case RegionDetail:
+		if lx, ly, ok := localCell(msg.X, msg.Y, m.layout.Detail); ok {
+			m.detailSel.begin(lx, ly)
+		}
 	}
 	return m, cmd
+}
+
+// continueDetailSelection routes an in-progress Detail-pane drag's motion and
+// release events (see handleMouse) — coordinates are clamped to the pane's
+// body rather than re-validated, so dragging past the border still extends
+// the selection instead of freezing it.
+func (m *BrowseModel) continueDetailSelection(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	lx, ly := clampCell(msg.X, msg.Y, m.layout.Detail)
+	if msg.Action == tea.MouseActionRelease {
+		m.detailSel.end(lx, ly)
+		m.copyDetailSelection()
+		return m, nil
+	}
+	m.detailSel.extend(lx, ly)
+	return m, nil
+}
+
+// copyDetailSelection finalizes a finished Detail-pane selection: copies its
+// plain text to the system clipboard via OSC 52 and leaves a one-line
+// confirmation in the status bar. A no-op for a plain click (no drag) — see
+// selectionState.end.
+func (m *BrowseModel) copyDetailSelection() {
+	if !m.detailSel.hasSelection {
+		return
+	}
+	text := selectedText(strings.Split(m.previewVP.View(), "\n"), m.detailSel)
+	m.copyText(text)
+}
+
+// copyText writes text to the system clipboard (OSC 52, via the same
+// *ImageWriter already wired in for out-of-band escape injection — see
+// imgwriter.go) and leaves a one-line status-bar confirmation, reusing the
+// same statusMsg mechanism run/submit/sync results already report through.
+func (m *BrowseModel) copyText(text string) {
+	if text == "" {
+		return
+	}
+	if m.imgWriter != nil {
+		m.imgWriter.Queue(osc52Copy(text))
+	}
+	m.statusMsg = copiedStatusMsg(text)
 }
 
 func (m *BrowseModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -971,13 +1034,26 @@ func (m *BrowseModel) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m *BrowseModel) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, m.keys.Up):
+		m.detailSel.clear()
 		m.previewVP.ScrollUp(2)
 	case key.Matches(msg, m.keys.Down):
+		m.detailSel.clear()
 		m.previewVP.ScrollDown(2)
 	case key.Matches(msg, m.keys.PageUp):
+		m.detailSel.clear()
 		m.previewVP.PageUp()
 	case key.Matches(msg, m.keys.PageDown):
+		m.detailSel.clear()
 		m.previewVP.PageDown()
+	case key.Matches(msg, m.keys.Copy):
+		// F1 keyboard fallback: copy the whole pane's visible content when
+		// there's no active drag selection to copy instead (e.g. terminals
+		// without OSC 52 support).
+		if m.detailSel.hasSelection {
+			m.copyDetailSelection()
+		} else {
+			m.copyText(plainViewportText(m.previewVP.View()))
+		}
 	}
 	return m, nil
 }
@@ -1223,6 +1299,7 @@ func (m *BrowseModel) refreshDetail() tea.Cmd {
 		body := m.statusDetailBody(m.previewVP.Width)
 		if body != m.previewRenderedBody {
 			m.previewVP.SetContent(body)
+			m.detailSel.clear()
 			m.previewVP.GotoTop()
 			m.previewRenderedBody = body
 		}
@@ -1275,6 +1352,7 @@ func (m *BrowseModel) refreshPreviewContent() tea.Cmd {
 	if e, ok := m.renderCache[key]; ok {
 		if key != m.previewRenderedKey {
 			m.previewVP.SetContent(e.content)
+			m.detailSel.clear()
 			m.previewVP.GotoTop()
 			m.previewRenderedKey = key
 		}

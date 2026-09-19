@@ -280,6 +280,21 @@ func renderRunCases(th Theme, out *RemoteOutcome, sentCases []testcase.Case, wid
 	return b.String()
 }
 
+// hyperlink wraps display in an OSC 8 hyperlink escape pointing at url, so
+// terminals that support it (iTerm2, WezTerm, kitty, Windows Terminal, ...)
+// let the user Cmd/Ctrl-click it open in a browser. display may itself carry
+// its own ANSI styling (SGR color/underline/bold/...) — OSC 8's start/end
+// markers just bracket it and are otherwise invisible/non-printing, so
+// nesting is safe and doesn't disturb that styling either way round. A
+// terminal without OSC 8 support simply prints display unaffected, the same
+// as any other escape sequence it doesn't recognize.
+func hyperlink(display, url string) string {
+	if url == "" {
+		return display
+	}
+	return "\x1b]8;;" + url + "\x1b\\" + display + "\x1b]8;;\x1b\\"
+}
+
 // truncate shortens s to at most max terminal cells, adding an ellipsis when it
 // cuts. It measures by display width and is ANSI- and grapheme-aware, so a wide
 // glyph (emoji like 🔒, CJK) or an embedded style sequence can't push the line

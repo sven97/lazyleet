@@ -23,8 +23,13 @@ type BrowseKeyMap struct {
 	ClearListFilter key.Binding
 	Sync            key.Binding
 	Zoom            key.Binding
-	Help            key.Binding
-	Quit            key.Binding
+	// Copy (F1) copies the Detail pane's current text selection, or its whole
+	// visible content if there is no selection — a keyboard fallback for
+	// terminals without OSC 52 support. Left out of shortcutHints (F3 keeps
+	// that bar to 3 items); documented in `?` help.
+	Copy key.Binding
+	Help key.Binding
+	Quit key.Binding
 }
 
 func DefaultBrowseKeyMap() BrowseKeyMap {
@@ -48,6 +53,7 @@ func DefaultBrowseKeyMap() BrowseKeyMap {
 		ClearListFilter: key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "clear filters/sort")),
 		Sync:            key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "sync")),
 		Zoom:            key.NewBinding(key.WithKeys("z", "+"), key.WithHelp("z", "zoom")),
+		Copy:            key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "copy selection (or whole pane)")),
 		Help:            key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
 		Quit:            key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
 	}

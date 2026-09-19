@@ -91,6 +91,105 @@ func TestRenderStatementInlinesKnownImage(t *testing.T) {
 	}
 }
 
+// TestLinkifyURLsWrapsBareURL asserts a bare URL in plain (unrendered) text
+// gets wrapped in exactly one OSC 8 hyperlink, with the visible text
+// unchanged once the OSC 8 escapes are stripped back out.
+func TestLinkifyURLsWrapsBareURL(t *testing.T) {
+	in := "see https://example.com/docs for details"
+	got := linkifyURLs(in)
+	want := "see " + hyperlink("https://example.com/docs", "https://example.com/docs") + " for details"
+	if got != want {
+		t.Fatalf("linkifyURLs() =\n%q\nwant\n%q", got, want)
+	}
+	if strings.Count(got, "\x1b]8;;") != 2 { // one open + one close marker
+		t.Errorf("expected exactly one hyperlink wrap (2 OSC8 markers), got %d in %q", strings.Count(got, "\x1b]8;;"), got)
+	}
+}
+
+// TestLinkifyURLsTrimsTrailingSentencePunctuation keeps a URL's trailing
+// sentence punctuation (or a markdown link's closing paren) outside the
+// clickable range, matching how most linkifiers treat it.
+func TestLinkifyURLsTrimsTrailingSentencePunctuation(t *testing.T) {
+	cases := map[string]string{
+		"visit https://example.com.":     "https://example.com",
+		"see (https://example.com/x).":   "https://example.com/x",
+		"link: https://example.com/x!!!": "https://example.com/x",
+	}
+	for in, wantURL := range cases {
+		got := linkifyURLs(in)
+		if !strings.Contains(got, "\x1b]8;;"+wantURL+"\x1b\\") {
+			t.Errorf("linkifyURLs(%q) = %q, want it to wrap exactly %q", in, got, wantURL)
+		}
+	}
+}
+
+// TestLinkifyURLsStopsBeforeANSIEscape reproduces glamour's own link
+// rendering shape: BaseElement prints the URL's own SGR-styled run with a
+// style-reset code directly appended, no separating space (see
+// LinkElement.renderHrefPart / BaseElement.Render in
+// charmbracelet/glamour/ansi). The greedy \S+ a naive regex would use swallows
+// that trailing escape into the "URL"; bareURLRe must not.
+func TestLinkifyURLsStopsBeforeANSIEscape(t *testing.T) {
+	rendered := "\x1b[4;30mhttps://example.com/path\x1b[0m and more text"
+	got := linkifyURLs(rendered)
+	if !strings.Contains(got, "\x1b]8;;https://example.com/path\x1b\\") {
+		t.Fatalf("expected the hyperlink target to be exactly the URL (no trailing escape bytes), got %q", got)
+	}
+	// The original SGR start/reset codes must both survive intact, now
+	// bracketing the OSC 8-wrapped URL rather than the bare URL text — the
+	// visible styling is unaffected either way.
+	want := "\x1b[4;30m" + hyperlink("https://example.com/path", "https://example.com/path") + "\x1b[0m and more text"
+	if got != want {
+		t.Fatalf("linkifyURLs must not disturb the surrounding ANSI styling:\ngot  %q\nwant %q", got, want)
+	}
+}
+
+// TestLinkifyURLsNoBareURLIsNoop asserts text without a bare URL passes
+// through unchanged.
+func TestLinkifyURLsNoBareURLIsNoop(t *testing.T) {
+	in := "no links here, just prose."
+	if got := linkifyURLs(in); got != in {
+		t.Fatalf("linkifyURLs(%q) = %q, want unchanged", in, got)
+	}
+}
+
+// TestRenderStatementLinkifiesBareURLAfterGlamour is an end-to-end check that
+// renderStatementMD's final output (real glamour rendering, not a hand-built
+// string) gets its bare URL wrapped exactly once, and that glamour's own
+// [text](url) link rendering — which prints the href as its own styled,
+// visible run (see glamour/ansi/link.go) — isn't double-wrapped or corrupted:
+// the plain (ANSI-stripped) text must be identical before and after
+// linkifying, and each URL gets exactly one hyperlink wrap.
+func TestRenderStatementLinkifiesBareURLAfterGlamour(t *testing.T) {
+	md := "Bare link: https://example.com/bare\n\n" +
+		"Markdown link: [the docs](https://example.com/md)\n"
+	const width = 60
+	out, _ := renderStatementMD(newStatementRenderer(width), md, width, nil)
+
+	if !strings.Contains(out, "\x1b]8;;https://example.com/bare\x1b\\") {
+		t.Errorf("bare URL should be hyperlink-wrapped, got:\n%s", out)
+	}
+	if !strings.Contains(out, "\x1b]8;;https://example.com/md\x1b\\") {
+		t.Errorf("glamour's own printed href should also be hyperlink-wrapped, got:\n%s", out)
+	}
+	// Each URL should be wrapped exactly once (one open + one close marker),
+	// not double-wrapped by a second pass over glamour's own link styling.
+	if n := strings.Count(out, "\x1b]8;;https://example.com/bare\x1b\\"); n != 1 {
+		t.Errorf("bare URL wrapped %d times, want 1:\n%s", n, out)
+	}
+	if n := strings.Count(out, "\x1b]8;;https://example.com/md\x1b\\"); n != 1 {
+		t.Errorf("markdown link's href wrapped %d times, want 1:\n%s", n, out)
+	}
+	// The visible (ANSI+OSC8-stripped) text must still contain both URLs and
+	// the surrounding prose, unmangled.
+	plain := ansi.Strip(out)
+	plain = strings.NewReplacer("\x1b]8;;https://example.com/bare\x1b\\", "",
+		"\x1b]8;;https://example.com/md\x1b\\", "", "\x1b]8;;\x1b\\", "").Replace(plain)
+	if !strings.Contains(plain, "Bare link:") || !strings.Contains(plain, "the docs") {
+		t.Errorf("linkifying must not disturb surrounding prose, got:\n%s", plain)
+	}
+}
+
 func TestProblemTitle(t *testing.T) {
 	if got, want := problemTitle(1, "Two Sum", false), "1. Two Sum"; got != want {
 		t.Errorf("problemTitle() = %q, want %q", got, want)
