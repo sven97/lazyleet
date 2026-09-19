@@ -274,6 +274,63 @@ func TestWorkspaceCodeDragSelectionCopiesExactPlainText(t *testing.T) {
 	}
 }
 
+// TestWorkspaceResultsRefreshDuringActiveDragDoesNotClearSelection guards
+// against a regression where refreshResults — called on every spinner.TickMsg
+// while a run/submit is in flight — unconditionally cleared an in-progress
+// click-drag selection in the Results pane, silently dropping it before the
+// user could release the mouse: no copy, no error, no status message.
+func TestWorkspaceResultsRefreshDuringActiveDragDoesNotClearSelection(t *testing.T) {
+	q, _ := leetcode.Fixture("two-sum")
+	ws, err := workspace.Scaffold(t.TempDir(), q, "python3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := NewWorkspaceModel(ws, q, "true", false, 400, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	up, _ := m.Update(tea.WindowSizeMsg{Width: 140, Height: 40})
+	m = up.(*WorkspaceModel)
+
+	tc := newTestClipboard(t)
+	m.imgWriter = tc.iw
+
+	m.focused = PaneResults
+	m.relayout()
+	m.results.SetContent(dragContent)
+
+	r := m.layout.RectFor(PaneResults)
+	anchorX, anchorY := r.X+1+6, r.Y+1+0
+	releaseX, releaseY := r.X+1+4, r.Y+1+2
+
+	upModel, _ := m.Update(press(anchorX, anchorY))
+	m = upModel.(*WorkspaceModel)
+	upModel, _ = m.Update(motion(releaseX, releaseY))
+	m = upModel.(*WorkspaceModel)
+
+	// Simulate a spinner tick firing mid-drag — the real-world trigger:
+	// refreshResults runs on every spinner.TickMsg while a run/submit is in
+	// progress (m.running / m.showRemote+m.remoteRunning).
+	m.running = true
+	m.refreshResults()
+	if !m.sel.active {
+		t.Fatal("refreshResults during an active drag must not clear it")
+	}
+	m.running = false
+	m.results.SetContent(dragContent) // restore predictable content for the release below
+
+	// The returned model is never read again after this — the assertions
+	// below only need tc.flush(t) — so it's discarded rather than reassigned
+	// into m (staticcheck SA4006: dead store).
+	m.Update(release(releaseX, releaseY))
+
+	want := "world\n" + dragLine1 + "\nthird"
+	if got := decodeOSC52(t, tc.flush(t)); got != want {
+		t.Fatalf("copied text =\n%q\nwant\n%q", got, want)
+	}
+}
+
 // TestWorkspaceDragSurvivesHintsOpenedMidDrag is the workspace-side
 // equivalent of TestBrowseDetailDragSurvivesOverlayOpenedMidDrag: opening the
 // Hints overlay (the `H` key) between a drag's press and release must not

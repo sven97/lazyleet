@@ -181,6 +181,17 @@ func splitTrailingURLPunct(u string) (core, trail string) {
 // glamour's own link styling, whether the URL came from a bare link in the
 // source markdown or is the visible href glamour prints beside a
 // [text](url) link (see LinkElement.Render).
+//
+// Known limitation: running after glamour's word-wrap means a bare URL too
+// long to fit one line arrives here already split across lines by a "\n" —
+// bareURLRe stops at that newline, so only the first wrapped fragment gets
+// linkified, and both the displayed text and the OSC 8 click target end up
+// truncated to that fragment (a broken/dead link) rather than the real URL.
+// Not fixed here: the real fix needs linkifying each raw markdown segment
+// before glamour wraps it, so the hyperlink target is captured from the
+// unwrapped source — a bigger, riskier change than warranted as a late
+// addition, and one that needs its own tests around glamour's link
+// rendering. Tracked in notes/PLAN.md's Phase 7 UI revamp entry.
 func linkifyURLs(s string) string {
 	return bareURLRe.ReplaceAllStringFunc(s, func(u string) string {
 		core, trail := splitTrailingURLPunct(u)

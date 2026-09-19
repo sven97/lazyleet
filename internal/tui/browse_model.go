@@ -493,7 +493,11 @@ func (m *BrowseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.renderCache[msg.key] = previewEntry{content: msg.content, prefix: msg.prefix}
 		if msg.key == m.previewKey() && !m.detailShowsStatus {
 			m.previewVP.SetContent(msg.content)
-			m.detailSel.clear()
+			// Only clear a finished selection, not one still mid-drag — see
+			// the matching comment on WorkspaceModel.refreshStatement.
+			if !m.detailSel.active {
+				m.detailSel.clear()
+			}
 			m.previewVP.GotoTop()
 			m.previewRenderedKey = msg.key
 			m.previewContentSlug = m.previewSlug
@@ -1303,7 +1307,11 @@ func (m *BrowseModel) refreshDetail() tea.Cmd {
 		body := m.statusDetailBody(m.previewVP.Width)
 		if body != m.previewRenderedBody {
 			m.previewVP.SetContent(body)
-			m.detailSel.clear()
+			// Only clear a finished selection, not one still mid-drag — see
+			// the matching comment on WorkspaceModel.refreshStatement.
+			if !m.detailSel.active {
+				m.detailSel.clear()
+			}
 			m.previewVP.GotoTop()
 			m.previewRenderedBody = body
 		}
@@ -1356,7 +1364,11 @@ func (m *BrowseModel) refreshPreviewContent() tea.Cmd {
 	if e, ok := m.renderCache[key]; ok {
 		if key != m.previewRenderedKey {
 			m.previewVP.SetContent(e.content)
-			m.detailSel.clear()
+			// Only clear a finished selection, not one still mid-drag — see
+			// the matching comment on WorkspaceModel.refreshStatement.
+			if !m.detailSel.active {
+				m.detailSel.clear()
+			}
 			m.previewVP.GotoTop()
 			m.previewRenderedKey = key
 		}
