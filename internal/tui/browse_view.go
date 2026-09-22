@@ -162,7 +162,11 @@ func (m *BrowseModel) statusPaneBody(w int) string {
 		}
 		line2 = style.Render(truncate(txt, w))
 	}
-	return line1 + "\n" + line2 + "\n" + m.dailyStatusLine(w)
+	out := line1 + "\n" + line2 + "\n" + m.dailyStatusLine(w)
+	if up := m.statusUpdateLine(w); up != "" {
+		out += "\n" + up // the pane's spare fourth row (see brStatusH)
+	}
+	return out
 }
 
 // dailyStatusLine is the one-line "daily · done/not-done · streak N" summary.
@@ -245,6 +249,7 @@ func (m *BrowseModel) statusHeaderBlock(w int) string {
 	if m.version != "" {
 		b.WriteString(th.Muted.Render(truncate(m.version, w)) + "\n")
 	}
+	b.WriteString(m.updateDetailLine(w))
 
 	b.WriteString("\n")
 	link := th.Muted.Underline(true)
@@ -537,6 +542,8 @@ func (m *BrowseModel) renderStatusBar() string {
 	msg := ""
 	if m.syncing {
 		msg = m.th.Spinner.Render(m.spin.View()) + " syncing"
+	} else if m.updating {
+		msg = m.th.Spinner.Render(m.spin.View()) + " updating to " + m.update.Latest
 	} else if m.progressing {
 		msg = m.th.Spinner.Render(m.spin.View()) + " syncing progress"
 	} else if m.statusMsg != "" {
@@ -553,6 +560,11 @@ func (m *BrowseModel) renderStatusBar() string {
 			style = m.th.ErrorText
 		}
 		age = style.Render(fmt.Sprintf("synced %s ago", roughAge(d)))
+	}
+	// Same rule for an available update: the Status pane's line is the main
+	// signal, so only echo it here when that pane isn't on screen.
+	if m.update != nil && !m.updating && msg == "" && m.layout.Single && m.focus != RegionStatus {
+		msg = m.th.Pass.Render("↑ " + m.update.Latest + " available")
 	}
 	status := msg
 	if age != "" {
@@ -585,6 +597,7 @@ func (m *BrowseModel) renderHelp() string {
 		{"S", "cycle sort (# → AC%↑ → AC%↓ → difficulty)"},
 		{"c", "clear all filters + sort"},
 		{"s", "sync problem cache from LeetCode"},
+		{"U", "update lazyleet (when the Status pane shows a new version)"},
 		{"t", "filter by topic tags (match all selected)"},
 		{"click+drag", "select text in the Detail pane (copies on release)"},
 		{"y", "copy Detail pane's selection, or all of it if none"},

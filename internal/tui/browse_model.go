@@ -111,6 +111,14 @@ type BrowseModel struct {
 	// without internal/tui importing cmd/lazyleet.
 	version string
 
+	// Self-update (see browse_update.go): update is non-nil once a newer
+	// release is known; updateConfirm is the first of the two U presses.
+	updater          Updater
+	update           *UpdateInfo
+	updateConfirm    bool
+	updating         bool
+	restartAfterQuit bool
+
 	auth AuthState
 
 	daily       DailyInfo
@@ -189,7 +197,7 @@ func NewBrowseModel(data BrowseData) *BrowseModel {
 }
 
 func (m *BrowseModel) Init() tea.Cmd {
-	return tea.Batch(m.spin.Tick, m.loadProblems(), m.loadPlans(), m.loadAuth(), m.loadDaily(), m.loadPosition())
+	return tea.Batch(m.spin.Tick, m.loadProblems(), m.loadPlans(), m.loadAuth(), m.loadDaily(), m.loadPosition(), m.checkUpdate())
 }
 
 // browseRestore is the source+problem remembered from the previous session.
@@ -524,6 +532,12 @@ func (m *BrowseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.statusMsg = fmt.Sprintf("progress synced · %d solved", msg.solved)
 		return m, tea.Batch(m.loadProblems(), m.loadDaily(), m.refreshDetail())
 
+	case updateCheckedMsg:
+		return m.handleUpdateChecked(msg)
+
+	case updateAppliedMsg:
+		return m.handleUpdateApplied(msg)
+
 	case tea.MouseMsg:
 		return m.handleMouse(msg)
 
@@ -663,6 +677,10 @@ func (m *BrowseModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	if reg == RegionStatus && m.update != nil && !m.layout.Single && msg.Y == m.updateLineY() {
+		return m.requestUpdate()
+	}
+
 	var cmd tea.Cmd
 	if m.focus != reg {
 		m.setFocus(reg)
@@ -755,10 +773,19 @@ func (m *BrowseModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmd, m.debouncePreview())
 	}
 
+	if m.updateConfirm && !key.Matches(msg, m.keys.Update) {
+		m.cancelUpdateConfirm()
+		if key.Matches(msg, m.keys.ClearFilt) {
+			return m, nil // esc only cancels the pending update
+		}
+	}
+
 	switch {
 	case key.Matches(msg, m.keys.Quit):
 		m.savePosition()
 		return m, tea.Quit
+	case key.Matches(msg, m.keys.Update) && !m.showHelp:
+		return m.requestUpdate()
 	case key.Matches(msg, m.keys.Help):
 		m.showHelp = !m.showHelp
 		return m, nil

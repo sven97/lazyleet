@@ -41,6 +41,9 @@ type Config struct {
 	CacheTTL        Duration          `yaml:"cache_ttl"`
 	Keys            map[string]string `yaml:"keys"` // semantic action -> key override
 	Workspace       WorkspaceConfig   `yaml:"workspace"`
+	// UpdateCheck looks for a newer release on launch (at most once a day)
+	// and offers it in the Status pane.
+	UpdateCheck bool `yaml:"update_check"`
 }
 
 // WorkspaceConfig tunes coding-workspace behaviour.
@@ -61,6 +64,7 @@ func Default() Config {
 		Images:          "auto",
 		CacheTTL:        defaultCacheTTL,
 		Keys:            map[string]string{},
+		UpdateCheck:     true,
 		Workspace: WorkspaceConfig{
 			Tier:          TierAuto,
 			RunOnSave:     true,

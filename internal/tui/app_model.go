@@ -103,7 +103,8 @@ func isBrowseBackgroundMsg(msg tea.Msg) bool {
 	switch msg.(type) {
 	case browseLoadedMsg, plansLoadedMsg, planSlugsMsg, statementMsg,
 		syncDoneMsg, progressDoneMsg, positionLoadedMsg, authLoadedMsg,
-		userLoadedMsg, dailyLoadedMsg, previewRenderedMsg, previewImagesMsg:
+		userLoadedMsg, dailyLoadedMsg, previewRenderedMsg, previewImagesMsg,
+		updateCheckedMsg, updateAppliedMsg:
 		return true
 	default:
 		return false
