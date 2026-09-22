@@ -136,6 +136,25 @@ make build
 
 Requires Go 1.27+. The SQLite driver is pure Go, so no C toolchain is needed.
 
+### Updating
+
+lazyleet checks GitHub for a new release when it starts, at most once a day and
+in the background. When one exists, the Status pane shows `↑ vX.Y.Z available`.
+Click that line or press `U`, then confirm with a second click or `U`. lazyleet
+updates itself the same way it was installed, then restarts in place:
+
+| Installed via | Update runs |
+|---------------|-------------|
+| Homebrew | `brew upgrade sven97/tap/lazyleet` |
+| `go install …@version` | `go install github.com/sven97/lazyleet/cmd/lazyleet@<new tag>` into the same directory |
+| Release archive | downloads the new archive, checks it against `checksums.txt`, and replaces the binary |
+| Source checkout | not updated automatically (`git pull && go install ./cmd/lazyleet`) |
+
+From the shell: `lazyleet update` installs the latest release, and
+`lazyleet update --check` only reports it. Turn the launch-time check off with
+`update_check: false` in `config.yml` or `LAZYLEET_NO_UPDATE_CHECK=1`. It is also
+skipped when `CI` is set.
+
 ## Usage (so far)
 
 ```sh
@@ -156,6 +175,7 @@ lazyleet auth import --browser firefox
 lazyleet auth paste           # or: enter LEETCODE_SESSION + csrftoken yourself
 lazyleet auth browsers        # list detected browser cookie stores
 lazyleet auth status | logout
+lazyleet update [--check]     # install (or just report) the latest release
 # successful auth automatically refreshes your solve progress
 # auth is needed for personal progress and `R` run / `s` submit on LeetCode
 
@@ -265,6 +285,7 @@ theme: default
 images: auto                # auto | off | blocks | kitty  (LAZYLEET_IMG overrides)
 cache_ttl: 24h
 keys: {}                   # semantic action -> key override
+update_check: true         # look for a new release on launch (once a day)
 workspace:
   tier: auto               # auto | mirror | multiplexer | embedded
   run_on_save: true

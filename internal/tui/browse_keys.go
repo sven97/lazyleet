@@ -23,6 +23,9 @@ type BrowseKeyMap struct {
 	ClearListFilter key.Binding
 	Sync            key.Binding
 	Zoom            key.Binding
+	// Update installs a newer release and restarts; a no-op unless the
+	// Status pane is showing one.
+	Update key.Binding
 	// Copy (F1) copies the Detail pane's current text selection, or its whole
 	// visible content if there is no selection — a keyboard fallback for
 	// terminals without OSC 52 support. Left out of shortcutHints (F3 keeps
@@ -53,6 +56,7 @@ func DefaultBrowseKeyMap() BrowseKeyMap {
 		ClearListFilter: key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "clear filters/sort")),
 		Sync:            key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "sync")),
 		Zoom:            key.NewBinding(key.WithKeys("z", "+"), key.WithHelp("z", "zoom")),
+		Update:          key.NewBinding(key.WithKeys("U"), key.WithHelp("U", "update lazyleet")),
 		Copy:            key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "copy selection (or whole pane)")),
 		Help:            key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
 		Quit:            key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
