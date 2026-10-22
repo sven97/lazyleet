@@ -849,6 +849,14 @@ func (m *WorkspaceModel) continueSelection(msg tea.MouseMsg) (tea.Model, tea.Cmd
 	lx, ly := clampCell(msg.X, msg.Y, r)
 	if msg.Action == tea.MouseActionRelease {
 		m.sel.end(lx, ly)
+		if !m.sel.hasSelection {
+			// A plain click, not a drag: open the link under it, if any. See
+			// links.go for why the app does this rather than the terminal.
+			if s := openLinkAt(m.paneViewport(m.selPane).View(), lx, ly); s != "" {
+				m.statusMsg = s
+			}
+			return m, nil
+		}
 		m.copySelection()
 		return m, nil
 	}

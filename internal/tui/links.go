@@ -93,6 +93,25 @@ var openURL = func(target string) error {
 	return nil
 }
 
+// openLinkAt opens the hyperlink under the pane-local cell (lx, ly) of view (a
+// viewport's View() output), for a plain click on that pane. It returns the
+// line to show in the status bar, or "" when no link is there — a click on
+// plain text just focuses the pane as before.
+func openLinkAt(view string, lx, ly int) string {
+	lines := strings.Split(view, "\n")
+	if ly < 0 || ly >= len(lines) {
+		return ""
+	}
+	target, ok := linkAtCell(lines[ly], lx)
+	if !ok {
+		return ""
+	}
+	if err := openLink(target); err != nil {
+		return "couldn't open link: " + err.Error()
+	}
+	return "opened " + target
+}
+
 // openLink opens target in the default browser. Only http(s) is allowed: the
 // Detail pane also shows links lifted from LeetCode's problem statements, and
 // a click must never hand a file:, javascript: or custom-scheme URL to the OS.

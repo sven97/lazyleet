@@ -193,10 +193,10 @@ browse and `debug plan` can still use the cached plan. `sync --plans` checks
 plans even when the problem catalog is fresh; add `--force` to refresh both.
 A failed prefetch reports an error while keeping previously cached plans.
 
-In browse mode, click a link in the Detail pane — the repo, issues and releases
-links in the Status panel, or a URL in a problem statement — to open it in your
-browser. Dragging selects and copies text instead. This works in any terminal,
-including ones without hyperlink support.
+Click a link to open it in your browser: the repo, issues and releases links in
+the Status panel, or a URL in a problem statement (in browse mode's Detail pane
+or the workspace's Statement pane). Dragging selects and copies text instead.
+This works in any terminal, including ones without hyperlink support.
 
 In the workspace: `e` edit in `$EDITOR` · `r` run local tests · `R` run on
 LeetCode · `s` submit · `i` import the last failing case · `tab`/`h`/`l` switch
