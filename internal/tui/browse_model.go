@@ -722,7 +722,11 @@ func (m *BrowseModel) continueDetailSelection(msg tea.MouseMsg) (tea.Model, tea.
 	if msg.Action == tea.MouseActionRelease {
 		m.detailSel.end(lx, ly)
 		if !m.detailSel.hasSelection {
-			m.openDetailLinkAt(lx, ly) // a plain click, not a drag
+			// A plain click, not a drag: open the link under it, if any. See
+			// links.go for why the app does this rather than the terminal.
+			if s := openLinkAt(m.previewVP.View(), lx, ly); s != "" {
+				m.statusMsg = s
+			}
 			return m, nil
 		}
 		m.copyDetailSelection()
@@ -730,26 +734,6 @@ func (m *BrowseModel) continueDetailSelection(msg tea.MouseMsg) (tea.Model, tea.
 	}
 	m.detailSel.extend(lx, ly)
 	return m, nil
-}
-
-// openDetailLinkAt opens the hyperlink under the pane-local cell (lx, ly) of
-// the Detail pane, if there is one — a no-op for a click on plain text, which
-// just focuses the pane as before. See links.go for why the app does this
-// rather than leaving it to the terminal.
-func (m *BrowseModel) openDetailLinkAt(lx, ly int) {
-	lines := strings.Split(m.previewVP.View(), "\n")
-	if ly < 0 || ly >= len(lines) {
-		return
-	}
-	target, ok := linkAtCell(lines[ly], lx)
-	if !ok {
-		return
-	}
-	if err := openLink(target); err != nil {
-		m.statusMsg = "couldn't open link: " + err.Error()
-		return
-	}
-	m.statusMsg = "opened " + target
 }
 
 // copyDetailSelection finalizes a finished Detail-pane selection: copies its

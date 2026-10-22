@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -88,14 +89,20 @@ func statusAboutModel(t *testing.T) *BrowseModel {
 // there. This is what a user would click on.
 func screenCellOfLink(t *testing.T, m *BrowseModel, target string) (x, y int) {
 	t.Helper()
+	return screenCellOfLinkIn(t, m.previewVP.View(), m.layout.Detail, target)
+}
+
+// screenCellOfLinkIn is screenCellOfLink for any bordered pane: view is the
+// pane viewport's View() and r the pane's outer rect.
+func screenCellOfLinkIn(t *testing.T, view string, r Rect, target string) (x, y int) {
+	t.Helper()
 	marker := "\x1b]8;;" + target + "\x1b\\"
-	for row, line := range strings.Split(m.previewVP.View(), "\n") {
+	for row, line := range strings.Split(view, "\n") {
 		if i := strings.Index(line, marker); i >= 0 {
-			r := m.layout.Detail
 			return r.X + 1 + ansi.StringWidth(line[:i]) + 2, r.Y + 1 + row
 		}
 	}
-	t.Fatalf("no link to %s in the Detail pane:\n%s", target, m.previewVP.View())
+	t.Fatalf("no link to %s in the pane:\n%s", target, view)
 	return 0, 0
 }
 
@@ -188,5 +195,104 @@ func TestClickOnNonHTTPLinkIsRefused(t *testing.T) {
 	}
 	if !strings.Contains(m.statusMsg, "couldn't open link") {
 		t.Errorf("expected the refusal to be reported, got %q", m.statusMsg)
+	}
+}
+
+// --- workspace panes -----------------------------------------------------
+
+const stmtLinkURL = "https://example.com/docs/page"
+
+// workspaceWithStatementLink is a workspace whose Statement pane renders a
+// bare URL through the real markdown + linkify pipeline, focused on that pane.
+func workspaceWithStatementLink(t *testing.T) *WorkspaceModel {
+	t.Helper()
+	m := newTestWorkspaceModel(t)
+	up, _ := m.Update(tea.WindowSizeMsg{Width: 140, Height: 40}) // wide: two-column layout
+	m = up.(*WorkspaceModel)
+	m.q.Statement = "See " + stmtLinkURL + " for details."
+	m.focused = PaneStatement
+	m.relayout()
+	m.refreshStatement()
+	return m
+}
+
+func stepWS(m **WorkspaceModel, msg tea.Msg) {
+	up, _ := (*m).Update(msg)
+	*m = up.(*WorkspaceModel)
+}
+
+func TestWorkspaceStatementLinkOpensOnClick(t *testing.T) {
+	opened := stubOpener(t)
+	m := workspaceWithStatementLink(t)
+	x, y := screenCellOfLinkIn(t, m.statement.View(), m.layout.Statement, stmtLinkURL)
+
+	stepWS(&m, press(x, y))
+	if len(*opened) != 0 {
+		t.Fatalf("link opened on press, before the click finished: %v", *opened)
+	}
+	stepWS(&m, release(x, y))
+
+	if len(*opened) != 1 || (*opened)[0] != stmtLinkURL {
+		t.Fatalf("opened %v, want exactly [%s]", *opened, stmtLinkURL)
+	}
+	if !strings.Contains(m.statusMsg, stmtLinkURL) {
+		t.Errorf("expected a status-bar confirmation naming the link, got %q", m.statusMsg)
+	}
+}
+
+func TestWorkspaceClickOffLinkOpensNothing(t *testing.T) {
+	opened := stubOpener(t)
+	m := workspaceWithStatementLink(t)
+	_, y := screenCellOfLinkIn(t, m.statement.View(), m.layout.Statement, stmtLinkURL)
+	r := m.layout.Statement
+
+	// The first cell of the link's row is the "See " before the URL; the far
+	// right of the same row is blank space past it.
+	for _, x := range []int{r.X + 1, r.X + r.W - 3} {
+		stepWS(&m, press(x, y))
+		stepWS(&m, release(x, y))
+	}
+	if len(*opened) != 0 {
+		t.Fatalf("opened %v for clicks that weren't on a link", *opened)
+	}
+}
+
+func TestWorkspaceDraggingAcrossALinkSelectsInsteadOfOpening(t *testing.T) {
+	opened := stubOpener(t)
+	m := workspaceWithStatementLink(t)
+	tc := newTestClipboard(t)
+	m.imgWriter = tc.iw
+	x, y := screenCellOfLinkIn(t, m.statement.View(), m.layout.Statement, stmtLinkURL)
+
+	stepWS(&m, press(x, y))
+	stepWS(&m, motion(x+5, y))
+	stepWS(&m, release(x+5, y))
+
+	if len(*opened) != 0 {
+		t.Fatalf("a drag opened %v; it should only select", *opened)
+	}
+	if got := decodeOSC52(t, tc.flush(t)); got == "" {
+		t.Error("the drag should still have copied the selected text")
+	}
+}
+
+// A URL in the Code pane is just text in the user's source, not a hyperlink,
+// so clicking it must do nothing.
+func TestWorkspaceCodePaneURLIsNotClickable(t *testing.T) {
+	opened := stubOpener(t)
+	m := newTestWorkspaceModel(t)
+	up, _ := m.Update(tea.WindowSizeMsg{Width: 140, Height: 40})
+	m = up.(*WorkspaceModel)
+	m.focused = PaneCode
+	m.relayout()
+	m.code.SetContent("# see " + stmtLinkURL)
+	r := m.layout.Code
+	x, y := r.X+1+8, r.Y+1
+
+	stepWS(&m, press(x, y))
+	stepWS(&m, release(x, y))
+
+	if len(*opened) != 0 {
+		t.Fatalf("opened %v for a plain-text URL in the Code pane", *opened)
 	}
 }
