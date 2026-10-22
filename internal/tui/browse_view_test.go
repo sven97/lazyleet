@@ -2,10 +2,16 @@ package tui
 
 import (
 	"errors"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
 )
+
+// solvedFractionRE matches a rendered solved count like "12 / 400". Matching
+// the digits, not a bare " / ", keeps wordmark glyphs (FIGlet fonts use "/")
+// from being mistaken for one.
+var solvedFractionRE = regexp.MustCompile(`\d+ / \d+`)
 
 // wideStatusModel and narrowStatusModel are just past/below the widest line
 // statusHeaderBlock renders. The "releases" link line is wider than
@@ -85,7 +91,7 @@ func TestStatusDetailBodyAnonymousShowsSignInHint(t *testing.T) {
 	if !strings.Contains(got, "sign in to track") {
 		t.Errorf("anonymous user's Progress section should prompt to sign in:\n%s", got)
 	}
-	if strings.Contains(got, "solved") && strings.Contains(got, " / ") {
+	if solvedFractionRE.MatchString(got) {
 		t.Errorf("anonymous user shouldn't see a solved-count fraction:\n%s", got)
 	}
 }

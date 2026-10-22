@@ -189,15 +189,19 @@ func (m *BrowseModel) dailyStatusLine(w int) string {
 	return mark + " " + m.th.Muted.Render(truncate(txt, w-2))
 }
 
-// lazyleetArt is the pixel-style "lazyleet" wordmark shown at the top of the
-// expanded Status/About panel (Detail pane, RegionStatus focused), in the
-// spirit of lazygit's own About screen. Plain ASCII, no external asset — see
-// statusHeaderBlock for the narrow-pane fallback.
-const lazyleetArt = `#     ##  #### #  # #    #### #### ####
-#    #  #    # #  # #    #    #     #
-#    ####   #   ##  #    ###  ###   #
-#    #  #  #     #  #    #    #     #
-#### #  # ####   #  #### #### ####  #`
+// lazyleetArt is the "lazyleet" wordmark, in FIGlet's classic "standard"
+// font, shown at the top of the expanded Status/About panel (Detail pane,
+// RegionStatus focused), in the spirit of lazygit's own About screen. Plain
+// ASCII, no external asset — see statusHeaderBlock for the narrow-pane
+// fallback. The font has one backtick (in the "a"), which a raw string can't
+// hold, hence the splice; trailing spaces are trimmed so editors can't
+// silently strip them out from under the width calculation below.
+const lazyleetArt = ` _                 _           _
+| | __ _ _____   _| | ___  ___| |_
+| |/ _` + "`" + ` |_  / | | | |/ _ \/ _ \ __|
+| | (_| |/ /| |_| | |  __/  __/ |_
+|_|\__,_/___|\__, |_|\___|\___|\__|
+             |___/`
 
 // lazyleetArtWidth is lazyleetArt's rendered width in terminal columns,
 // computed from the art itself so a future tweak to the glyphs can't
@@ -258,7 +262,7 @@ func (m *BrowseModel) statusHeaderBlock(w int) string {
 	//
 	// The *displayed* text is truncated to w like every other width-bound
 	// line in this file — the links (up to 53 cols for "releases") are wider
-	// than lazyleetArtWidth (39 cols), so a pane that's wide enough for the
+	// than lazyleetArtWidth (35 cols), so a pane that's wide enough for the
 	// art (e.g. an 80-col terminal's default ~48-col Detail pane) can still
 	// be too narrow for the full URLs; without this they'd get silently
 	// hard-cut by the viewport with no ellipsis. The hyperlink *target*
